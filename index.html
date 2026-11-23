@@ -2,10 +2,10 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#1d3557">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
 <title>卡車改裝王</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚚</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚛</text></svg>">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": {
@@ -18,38 +18,54 @@
 <canvas id="c"></canvas>
 
 <!-- 開始畫面 -->
-<div id="title" class="overlay">
+<div id="title">
   <div class="title-box">
-    <div class="big-truck">🚚</div>
+    <div class="t-kicker">寫實重型卡車模擬</div>
     <h1>卡車改裝王</h1>
-    <p class="sub">開大卡車送貨賺金幣，把卡車改裝成全世界最酷的！</p>
+    <p class="sub">開聯結車送貨賺錢，把卡車改裝成你的專屬座駕。</p>
     <div class="howto">
-      <div><b>開車</b>：方向鍵 ↑↓←→ 或 W A S D（平板用畫面上的按鈕）</div>
-      <div><b>送貨</b>：跟著頭上的<b>黃色箭頭</b>開，開進發光的圈圈<b>停下來</b></div>
-      <div><b>改裝</b>：按右上角 <b>🔧 車庫</b>，換顏色、噴特殊漆、裝零件</div>
-      <div><b>喇叭</b>：H 鍵或 📯 按鈕　<b>大燈</b>：L 鍵</div>
+      <div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 油門／煞車（停住後按住＝倒車）／方向盤</div>
+      <div><kbd>Q</kbd><kbd>E</kbd> 方向燈　<kbd>L</kbd> 大燈　<kbd>K</kbd> 雨刷　<kbd>H</kbd> 喇叭</div>
+      <div><kbd>C</kbd> 換鏡頭　<kbd>T</kbd> 換時間　<kbd>Y</kbd> 換天氣　<kbd>G</kbd> 改裝廠</div>
+      <div class="tip">平板手機用畫面上的按鈕。跟著小地圖的<b>橘色導航線</b>開，停進黃色<b>裝卸區</b>就會自動裝貨、卸貨。</div>
     </div>
-    <button id="startBtn" class="btn-big">開始玩！</button>
+    <button id="startBtn" class="btn-big" disabled>發動引擎</button>
     <div id="loadMsg" class="load">載入中…</div>
   </div>
 </div>
 
-<!-- 開車畫面資訊 -->
+<!-- 開車畫面 -->
 <div id="hud" class="hidden">
-  <div class="hud-left">
-    <div id="coins" class="pill" title="金幣">💰 <span id="coinNum">0</span></div>
-    <div id="mission" class="pill mission"></div>
-    <div id="speed" class="pill speed"><span id="spdNum">0</span> <small>公里/小時</small></div>
+  <div class="top-left">
+    <div id="coins" class="chip" title="金幣">💰 <span id="coinNum">0</span></div>
   </div>
-  <div class="hud-right">
-    <button id="bGarage" class="tbtn">🔧<span>車庫</span></button>
-    <button id="bHorn" class="tbtn">📯<span>喇叭</span></button>
-    <button id="bLights" class="tbtn">💡<span>大燈</span></button>
+  <div id="mission">
+    <div id="navArrow">➤</div>
+    <div id="missionText"></div>
+  </div>
+  <div class="top-right">
+    <button id="bGarage" class="tbtn">🔧<span>改裝廠</span></button>
+    <button id="bEnv" class="tbtn">🌤<span>天氣</span></button>
     <button id="bCam" class="tbtn">📷<span>鏡頭</span></button>
-    <button id="bReset" class="tbtn">🔄<span>回車庫</span></button>
+    <button id="bReset" class="tbtn">🔄<span>回廠</span></button>
     <button id="bSound" class="tbtn">🔊<span>聲音</span></button>
   </div>
-  <canvas id="minimap" width="180" height="180"></canvas>
+  <canvas id="minimap" width="220" height="220"></canvas>
+  <div id="controls">
+    <button id="cL" class="cbtn">◀<span>方向燈</span></button>
+    <button id="cLights" class="cbtn">💡<span>大燈</span></button>
+    <button id="cWipers" class="cbtn">〰<span>雨刷</span></button>
+    <button id="cH" class="cbtn">⚠<span>警示燈</span></button>
+    <button id="cHorn" class="cbtn">📯<span>喇叭</span></button>
+    <button id="cR" class="cbtn">▶<span>方向燈</span></button>
+  </div>
+  <canvas id="cluster" width="520" height="230"></canvas>
+</div>
+
+<!-- 時間天氣 -->
+<div id="envPanel" class="hidden">
+  <div class="e-head">環境設定 <button id="envClose">✕</button></div>
+  <div id="envBody"></div>
 </div>
 
 <!-- 觸控按鈕 -->
@@ -59,21 +75,22 @@
     <button class="tc" data-k="right">▶</button>
   </div>
   <div class="tright">
-    <button class="tc brake" data-k="down">煞車<br><small>倒車</small></button>
+    <button class="tc brake" data-k="down">煞車<small>停住按住＝倒車</small></button>
     <button class="tc gas" data-k="up">油門</button>
   </div>
 </div>
 
-<!-- 車庫 -->
+<!-- 改裝廠 -->
 <div id="garage" class="hidden">
   <div class="g-head">
-    <div class="g-title">🔧 改裝車庫</div>
-    <div class="pill">💰 <span id="gCoins">0</span></div>
+    <div class="g-title">改裝廠</div>
+    <div class="chip">💰 <span id="gCoins">0</span></div>
   </div>
+  <div id="gService" class="g-service"></div>
   <div id="gTabs" class="g-tabs"></div>
   <div id="gBody" class="g-body"></div>
   <div id="gBuy" class="g-buy"></div>
-  <button id="gExit" class="btn-big g-exit">🚚 開車去送貨</button>
+  <button id="gExit" class="btn-big g-exit">🚛 開出去送貨</button>
 </div>
 
 <div id="toast"></div>
@@ -81,5 +98,10 @@
 <div id="ver"></div>
 
 <script type="module" src="game.js"></script>
+<script>
+  setTimeout(function () {
+    if (document.getElementById("startBtn").disabled) document.getElementById("loadMsg").textContent = "載入失敗或網路太慢，請檢查網路後重新整理頁面";
+  }, 15000);
+</script>
 </body>
 </html>

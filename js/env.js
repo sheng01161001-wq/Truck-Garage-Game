@@ -1,0 +1,120 @@
+// 天空、時間（白天／黃昏／晚上）、天氣（晴／雨／霧）、雨滴
+import * as THREE from 'three';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { rng } from './util.js';
+
+const TIMES = {
+  day: { elev: 50, azim: 140, lightElev: 50, sunColor: 0xfff3e2, sunI: 3.0, hemiSky: 0xbcd6ff, hemiGround: 0x4f5a3c, hemiI: 1.0, turb: 3, ray: 1.1, mie: 0.004, mieG: 0.8, exposure: 0.62, fog: 0xbfd0df, envI: 1.0, night: 0 },
+  dusk: { elev: 2.5, azim: 250, lightElev: 12, sunColor: 0xffa060, sunI: 3.4, hemiSky: 0xa58fb8, hemiGround: 0x4a3a30, hemiI: 0.8, turb: 9, ray: 3, mie: 0.012, mieG: 0.95, exposure: 0.75, fog: 0xd0a080, envI: 0.85, night: 0.45 },
+  night: { elev: -14, azim: 200, lightElev: 42, sunColor: 0x9fb4ff, sunI: 0.32, hemiSky: 0x2a3658, hemiGround: 0x0c0e12, hemiI: 0.45, turb: 1.5, ray: 0.4, mie: 0.003, mieG: 0.7, exposure: 0.75, fog: 0x0c1322, envI: 0.25, night: 1 },
+};
+
+export function createEnv(renderer, scene) {
+  const sky = new Sky(); sky.scale.setScalar(2000); sky.renderOrder = -2; scene.add(sky);
+  const envScene = new THREE.Scene(); const envSky = new Sky(); envSky.scale.setScalar(2000); envScene.add(envSky);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  let envRT = null;
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffffff, 3);
+  sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 400 });
+  sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
+  scene.add(sun, sun.target);
+  const sunDir = new THREE.Vector3(), lightDir = new THREE.Vector3();
+
+  // 星星
+  const r = rng(99), sp = [];
+  for (let i = 0; i < 1600; i++) {
+    const th = r() * Math.PI * 2, ph = Math.acos(r() * 0.95);
+    sp.push(Math.sin(ph) * Math.cos(th) * 2500, Math.cos(ph) * 2500, Math.sin(ph) * Math.sin(th) * 2500);
+  }
+  const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+  const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, fog: false, depthWrite: false }));
+  stars.frustumCulled = false; stars.renderOrder = -1; scene.add(stars);
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(60, 24, 16), new THREE.MeshBasicMaterial({ color: 0xf2f0e6, fog: false, depthWrite: false }));
+  moon.renderOrder = -1;
+  scene.add(moon);
+
+  // 雨
+  const RAIN = 2600;
+  const rp = new Float32Array(RAIN * 6), rv = new Float32Array(RAIN);
+  const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+  const rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0xaab4c0, transparent: true, opacity: 0.45 }));
+  rain.frustumCulled = false; rain.visible = false; scene.add(rain);
+  const resetDrop = (i, cx, cy, cz, anyY) => {
+    const x = cx + (r() - 0.5) * 70, z = cz + (r() - 0.5) * 70, y = anyY ? cy - 10 + r() * 40 : cy + 25 + r() * 8;
+    rp[i * 6] = x; rp[i * 6 + 1] = y; rp[i * 6 + 2] = z; rp[i * 6 + 3] = x + 0.08; rp[i * 6 + 4] = y - 0.9; rp[i * 6 + 5] = z + 0.05;
+    rv[i] = 22 + r() * 8;
+  };
+
+  const state = { time: 'day', weather: 'clear', night: 0, wet: false, indoor: false };
+  const fogBase = new THREE.Fog(0xbfd0df, 300, 2600);
+  scene.fog = fogBase;
+
+  function apply(time, weather) {
+    state.time = time; state.weather = weather;
+    const P = TIMES[time];
+    const rainy = weather === 'rain', foggy = weather === 'fog';
+    const u = sky.material.uniforms;
+    for (const s of [sky, envSky]) {
+      const uu = s.material.uniforms;
+      uu.turbidity.value = P.turb + (rainy ? 10 : foggy ? 6 : 0);
+      uu.rayleigh.value = rainy ? P.ray * 0.4 : P.ray;
+      uu.mieCoefficient.value = P.mie * (rainy || foggy ? 3 : 1);
+      uu.mieDirectionalG.value = P.mieG;
+    }
+    const phi = THREE.MathUtils.degToRad(90 - P.elev), th = THREE.MathUtils.degToRad(P.azim);
+    sunDir.setFromSphericalCoords(1, phi, th);
+    u.sunPosition.value.copy(sunDir); envSky.material.uniforms.sunPosition.value.copy(sunDir);
+    lightDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - P.lightElev), th + (time === 'night' ? 1.2 : 0));
+    sun.color.set(P.sunColor);
+    sun.intensity = P.sunI * (rainy ? 0.25 : foggy ? 0.45 : 1);
+    hemi.color.set(P.hemiSky); hemi.groundColor.set(P.hemiGround);
+    hemi.intensity = P.hemiI * (rainy ? 0.85 : 1);
+    renderer.toneMappingExposure = P.exposure * (rainy ? 0.85 : 1);
+    const fc = new THREE.Color(P.fog);
+    if (rainy) fc.lerp(new THREE.Color(time === 'night' ? 0x0a0d12 : 0x7d8792), 0.6);
+    if (foggy) fc.lerp(new THREE.Color(time === 'night' ? 0x1a1e24 : 0xc4c8cc), 0.75);
+    fogBase.color.copy(fc);
+    fogBase.near = foggy ? 4 : rainy ? 25 : 300;
+    fogBase.far = foggy ? 120 : rainy ? 420 : 2600;
+    sky.visible = time !== 'night';
+    scene.background = time === 'night' ? fc.clone() : null;
+    stars.visible = time === 'night' && !rainy && !foggy;
+    moon.visible = time === 'night' && !rainy && !foggy;
+    moon.position.copy(lightDir).multiplyScalar(2400);
+    rain.visible = rainy;
+    state.night = P.night * (rainy ? 1.2 : 1);
+    state.wet = rainy;
+    // 反射用環境光
+    if (envRT) envRT.dispose();
+    envSky.visible = true;
+    envRT = pmrem.fromScene(envScene, 0, 0.1, 3000);
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1);
+    for (let i = 0; i < RAIN; i++) resetDrop(i, 0, 0, 0, true);
+    return state;
+  }
+
+  function update(dt, focus, cam) {
+    sun.position.copy(focus).addScaledVector(lightDir, 200);
+    sun.target.position.copy(focus);
+    if (rain.visible) {
+      for (let i = 0; i < RAIN; i++) {
+        const dy = rv[i] * dt;
+        rp[i * 6 + 1] -= dy; rp[i * 6 + 4] -= dy;
+        if (rp[i * 6 + 4] < cam.y - 12 || Math.abs(rp[i * 6] - cam.x) > 40 || Math.abs(rp[i * 6 + 2] - cam.z) > 40) resetDrop(i, cam.x, cam.y, cam.z, false);
+      }
+      rg.attributes.position.needsUpdate = true;
+    }
+  }
+
+  function setIndoor(on) {
+    state.indoor = on;
+    scene.fog = on ? null : fogBase;
+    rain.visible = !on && state.weather === 'rain';
+  }
+
+  return { apply, update, setIndoor, state, sun, hemi };
+}
