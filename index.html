@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#1d3557">
+<title>卡車改裝王</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚚</text></svg>">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- 開始畫面 -->
+<div id="title" class="overlay">
+  <div class="title-box">
+    <div class="big-truck">🚚</div>
+    <h1>卡車改裝王</h1>
+    <p class="sub">開大卡車送貨賺金幣，把卡車改裝成全世界最酷的！</p>
+    <div class="howto">
+      <div><b>開車</b>：方向鍵 ↑↓←→ 或 W A S D（平板用畫面上的按鈕）</div>
+      <div><b>送貨</b>：跟著頭上的<b>黃色箭頭</b>開，開進發光的圈圈<b>停下來</b></div>
+      <div><b>改裝</b>：按右上角 <b>🔧 車庫</b>，換顏色、噴特殊漆、裝零件</div>
+      <div><b>喇叭</b>：H 鍵或 📯 按鈕　<b>大燈</b>：L 鍵</div>
+    </div>
+    <button id="startBtn" class="btn-big">開始玩！</button>
+    <div id="loadMsg" class="load">載入中…</div>
+  </div>
+</div>
+
+<!-- 開車畫面資訊 -->
+<div id="hud" class="hidden">
+  <div class="hud-left">
+    <div id="coins" class="pill" title="金幣">💰 <span id="coinNum">0</span></div>
+    <div id="mission" class="pill mission"></div>
+    <div id="speed" class="pill speed"><span id="spdNum">0</span> <small>公里/小時</small></div>
+  </div>
+  <div class="hud-right">
+    <button id="bGarage" class="tbtn">🔧<span>車庫</span></button>
+    <button id="bHorn" class="tbtn">📯<span>喇叭</span></button>
+    <button id="bLights" class="tbtn">💡<span>大燈</span></button>
+    <button id="bCam" class="tbtn">📷<span>鏡頭</span></button>
+    <button id="bReset" class="tbtn">🔄<span>回車庫</span></button>
+    <button id="bSound" class="tbtn">🔊<span>聲音</span></button>
+  </div>
+  <canvas id="minimap" width="180" height="180"></canvas>
+</div>
+
+<!-- 觸控按鈕 -->
+<div id="touch" class="hidden">
+  <div class="tleft">
+    <button class="tc" data-k="left">◀</button>
+    <button class="tc" data-k="right">▶</button>
+  </div>
+  <div class="tright">
+    <button class="tc brake" data-k="down">煞車<br><small>倒車</small></button>
+    <button class="tc gas" data-k="up">油門</button>
+  </div>
+</div>
+
+<!-- 車庫 -->
+<div id="garage" class="hidden">
+  <div class="g-head">
+    <div class="g-title">🔧 改裝車庫</div>
+    <div class="pill">💰 <span id="gCoins">0</span></div>
+  </div>
+  <div id="gTabs" class="g-tabs"></div>
+  <div id="gBody" class="g-body"></div>
+  <div id="gBuy" class="g-buy"></div>
+  <button id="gExit" class="btn-big g-exit">🚚 開車去送貨</button>
+</div>
+
+<div id="toast"></div>
+<div id="popup"></div>
+<div id="ver"></div>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>
