@@ -10,8 +10,9 @@ import { createTraffic } from './js/traffic.js';
 import { Snd } from './js/audio.js';
 import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
+import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -136,7 +137,7 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.3, 3000);
 const env = createEnv(renderer, scene);
 if (!HIGH) env.sun.shadow.mapSize.set(1024, 1024);
 buildWorld(scene, save.settings.quality);
-const traffic = createTraffic(scene, HIGH ? 16 : 10);
+const traffic = createTraffic(scene, HIGH ? 16 : 10, HIGH ? 5 : 3);
 
 // 晚上：在卡車附近的路燈放真的燈光（最多 6 盞）
 const lampLights = [];
@@ -152,6 +153,7 @@ const S = {
   gAng: 0.9, gDrag: null, gTab: 'model', pending: null,
   mission: null, hint: '', time: 0, temp: 0.5, hornT: 0, bumpsThisJob: 0, loadT: 0,
   route: null, routeT: 0, dirtDrawn: save.dirt, fuelCoinAcc: 0, wasStopped: true, lastSurface: 'road',
+  y: 0, yA: 0, grade: 0, tunNear: false, tollSide: null,
 };
 let rig = null;
 function rebuildRig(cfg) {
@@ -166,13 +168,16 @@ function rebuildRig(cfg) {
 function inGarage() { return S.mode === 'garage'; }
 function placeRig() {
   const g = inGarage();
-  const x = g ? SHOWROOM.x : S.x, z = g ? SHOWROOM.z + 5 : S.z, y = g ? SHOWROOM.y : 0;
+  const x = g ? SHOWROOM.x : S.x, z = g ? SHOWROOM.z + 5 : S.z, y = g ? SHOWROOM.y : S.y;
   const h = g ? 0 : S.heading, th = g ? 0 : S.trailerHeading;
+  // 上下坡：車頭、拖車跟著路面抬頭／低頭
+  const pT = g ? 0 : -Math.atan(S.grade), pTr = g ? 0 : -Math.atan((S.y - S.yA) / LT);
+  rig.tractor.rotation.order = 'YXZ'; rig.trailer.rotation.order = 'YXZ';
   rig.tractor.position.set(x, y + S.bump, z);
-  rig.tractor.rotation.set(S.pitch * 0.25, h, S.roll * 0.25);
+  rig.tractor.rotation.set(S.pitch * 0.25 + pT, h, S.roll * 0.25);
   rig.cab.rotation.set(S.pitch, 0, S.roll);
   rig.trailer.position.set(x, y + S.bump * 0.6, z);
-  rig.trailer.rotation.set(0, th, 0);
+  rig.trailer.rotation.set(pTr, th, 0);
   rig.trailerBody.rotation.set(0, 0, S.roll * 0.6);
 }
 
@@ -271,7 +276,7 @@ function setIndicator(k) { S.ind = S.ind === k ? null : k; S.blinkT = 0; S.indAr
 const CAM_NAMES = ['追車鏡頭', '高空鏡頭', '駕駛座', '路邊轉播'];
 function switchCam() { S.cam = (S.cam + 1) % 4; S.camYaw = 0; S.cine = null; toast('📷 ' + CAM_NAMES[S.cam], 1000); }
 function resetTruck() {
-  Object.assign(S, { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading, trailerHeading: SPAWN.heading, v: 0, steer: 0, gear: 1 });
+  Object.assign(S, { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading, trailerHeading: SPAWN.heading, v: 0, steer: 0, gear: 1, y: 0, yA: 0, grade: 0, tunNear: false, tollSide: null, tollPaid: false });
   placeRig(); toast('🔄 回到改裝廠門口', 1200);
 }
 function toggleSound() { Snd.init(); Snd.setMuted(!Snd.muted); $('#bSound').firstChild.textContent = Snd.muted ? '🔇' : '🔊'; }
@@ -449,8 +454,9 @@ function rigPoints(x, z, h, th) {
 function hitTest(x, z, h, th) {
   const cars = traffic.circles();
   for (const p of rigPoints(x, z, h, th)) {
-    if (Math.abs(p.x) > WORLD - p.r || Math.abs(p.z) > WORLD - p.r) return { wall: true };
-    for (const b of boxes) {
+    const out = Math.abs(p.x) > WORLD - p.r || Math.abs(p.z) > WORLD - p.r;
+    if (out && hwBlocked(p.x, p.z, p.r)) return { wall: true }; // 城外只能走國道
+    if (!out) for (const b of boxes) {
       const cx = clamp(p.x, b.minx, b.maxx), cz = clamp(p.z, b.minz, b.maxz);
       if ((p.x - cx) ** 2 + (p.z - cz) ** 2 < p.r * p.r) return { wall: true };
     }
@@ -500,7 +506,9 @@ function drive(dt) {
   }
   const dir = Math.sign(S.v);
   const resist = crr * mass * 9.81 + 3.3 * S.v * S.v + (accelPedal < 0.05 ? 0.035 * mass * Math.min(1, Math.abs(S.v)) : 0);
-  let a = F / mass - dir * resist / mass;
+  let a = F / mass - dir * resist / mass - 9.81 * S.grade; // 上坡變慢、下坡變快
+  if (!rev && S.v > VMAX + 0.3) a -= (S.v - VMAX) * 1.5; // 下坡自動排氣煞車，不超過 90
+  if (rev && S.v < -5) a += (-5 - S.v) * 1.5; // 倒車下坡也不會越倒越快
   // 煞車：重車煞車距離比較長
   const brakeDecel = brakePedal * 5.5 * grip * (1 - tons / 80);
   S.v += a * dt;
@@ -535,6 +543,15 @@ function drive(dt) {
     }
     S.v = -S.v * 0.2;
   }
+  // 路面高度、坡度
+  {
+    const fx = Math.sin(S.heading), fz = Math.cos(S.heading);
+    S.y = groundAt(S.x, S.z);
+    S.grade = (groundAt(S.x + fx * L, S.z + fz * L) - S.y) / L;
+    S.yA = groundAt(S.x - Math.sin(S.trailerHeading) * LT, S.z - Math.cos(S.trailerHeading) * LT);
+    S.tunNear = nearTunnel(S.x, S.z);
+    tollCheck(S.x + fx * 4, S.z + fz * 4, fx, fz);
+  }
   const dist = Math.abs(S.v) * dt;
   S.travelled += dist; S.wheelAngle += (S.v * dt) / RW;
   // 車身側傾、點頭（彈簧＋阻尼）
@@ -564,6 +581,24 @@ function drive(dt) {
   Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel, inside: S.cam === 2 });
 }
 
+// 收費站：車頭經過收費亭扣過路費；太快會提醒減速
+const TOLL = 15;
+function tollCheck(px, pz, fx, fz) {
+  if (inCity(px, pz)) { S.tollSide = null; S.tollPaid = false; return; }
+  const q = hwProject(px, pz);
+  if (q.s < 0 || q.s > 110 || Math.abs(q.o) > 23) { S.tollSide = null; S.tollPaid = false; return; }
+  const side = Math.sign(q.s - TOLL_S) || 1;
+  if (S.tollSide && side !== S.tollSide && !S.tollPaid) { // 一次進出收費站只收一次（撞到柵欄退回來不會再扣）
+    S.tollPaid = true;
+    if (save.coins >= TOLL) { save.coins -= TOLL; persist(); updateCoins(); Snd.coin(); toast(`🛣️ 過路費 −${TOLL} 金幣`, 1600); }
+    else toast('🛣️ 金幣不夠，這次先免費通過', 1600);
+  }
+  S.tollSide = side;
+  const p = HW_PTS[q.i], along = Math.sign((fx * p.fx + fz * p.fz) * S.v);
+  const ahead = (TOLL_S - q.s) * along;
+  if (ahead > 2 && ahead < 50 && Math.abs(S.v) > 8.4) S.hint = '收費站：減速到 30 以下，柵欄才會打開';
+}
+
 // ================= 鏡頭 =================
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 let camInit = false;
@@ -590,17 +625,19 @@ function updateCamera(dt) {
     look.set(Math.sin(yaw) * 10, -0.6, Math.cos(yaw) * 10).applyQuaternion(q).add(want);
     camPos.copy(want); camLook.copy(look);
     camera.position.copy(want); camera.lookAt(look); return;
-  } else if (S.cam === 3) {
+  } else if (S.cam === 3 && !S.tunNear) {
     const d = S.cine ? Math.hypot(S.cine.x - S.x, S.cine.z - S.z) : 999;
-    if (!S.cine || d > 70) { const side = Math.random() < 0.5 ? 1 : -1; S.cine = new THREE.Vector3(S.x + fx * 45 + fz * 9 * side, 2.2, S.z + fz * 45 - fx * 9 * side); }
-    want.copy(S.cine); look.set(S.x - Math.sin(S.trailerHeading) * 4, 2.5, S.z - Math.cos(S.trailerHeading) * 4);
+    if (!S.cine || d > 70) { const side = Math.random() < 0.5 ? 1 : -1, cx = S.x + fx * 45 + fz * 9 * side, cz = S.z + fz * 45 - fx * 9 * side; S.cine = new THREE.Vector3(cx, surfaceY(cx, cz) + 2.2, cz); }
+    want.copy(S.cine); look.set(S.x - Math.sin(S.trailerHeading) * 4, S.y + 2.5, S.z - Math.cos(S.trailerHeading) * 4);
     camPos.copy(want); camLook.lerp(look, Math.min(1, dt * 5)); camera.position.copy(camPos); camera.lookAt(camLook); return;
   } else {
-    const back = S.cam === 0 ? 19 : 42, up = S.cam === 0 ? 8.5 : 30;
+    // 隧道附近鏡頭放低，才不會穿到山裡
+    const back = S.tunNear ? 15 : S.cam === 1 ? 42 : 19, up = S.tunNear ? 4.6 : S.cam === 1 ? 30 : 8.5;
     if (S.camYawT > 0) { S.camYawT -= dt; if (S.camYawT <= 0) S.camYaw = 0; }
     const th = S.trailerHeading * 0.55 + S.heading * 0.45 + (S.camYawT > 0 ? S.camYaw : 0);
-    want.set(S.x - Math.sin(th) * back + fx * 2, up, S.z - Math.cos(th) * back + fz * 2);
-    look.set(S.x + fx * 7, 2.8, S.z + fz * 7);
+    want.set(S.x - Math.sin(th) * back + fx * 2, S.y + up, S.z - Math.cos(th) * back + fz * 2);
+    if (!S.tunNear) want.y = Math.max(want.y, surfaceY(want.x, want.z) + 3); // 不要鑽進山坡
+    look.set(S.x + fx * 7, S.y + 2.8, S.z + fz * 7);
   }
   if (!camInit) { camPos.copy(want); camLook.copy(look); camInit = true; }
   const k = inGarage() ? Math.min(1, dt * 6) : Math.min(1, dt * 3.2);
@@ -678,23 +715,25 @@ function frame(dt) {
   updateTrafficLights(S.time);
   const pts = rigPoints(S.x, S.z, S.heading, S.trailerHeading);
   traffic.update(dt, S.time, pts, env.state.night > 0.3);
+  updateHighway(dt, pts, traffic.positions(), Math.abs(S.v));
   lampT -= dt;
   if (lampT <= 0) {
-    lampT = 0.5;
+    lampT = S.tunNear ? 0.2 : 0.5;
     const on = env.state.night > 0.3 && !inGarage();
-    const near = on ? lampPositions().map((p) => [p, (p.x - S.x) ** 2 + (p.z - S.z) ** 2]).sort((a, b) => a[1] - b[1]).slice(0, lampLights.length) : [];
+    const cand = [...(on ? lampPositions() : []), ...(S.tunNear && !inGarage() ? TUNNEL_LAMPS : [])];
+    const near = cand.map((p) => [p, (p.x - S.x) ** 2 + (p.y - S.y) ** 2 + (p.z - S.z) ** 2]).sort((a, b) => a[1] - b[1]).slice(0, lampLights.length);
     lampLights.forEach((l, i) => { if (near[i]) { l.position.copy(near[i][0]); l.intensity = 260; } else l.intensity = 0; });
   }
-  if (inGarage()) focus.set(SHOWROOM.x, SHOWROOM.y, SHOWROOM.z); else focus.set(S.x, 0, S.z);
+  if (inGarage()) focus.set(SHOWROOM.x, SHOWROOM.y, SHOWROOM.z); else focus.set(S.x, S.y, S.z);
   updateCamera(dt);
-  env.update(dt, focus, camera.position);
+  env.update(dt, focus, camera.position, !inGarage() && inTunnel(camera.position.x, camera.position.y, camera.position.z));
   if (S.mode === 'drive') updateHud(dt);
   renderer.render(scene, camera);
 }
 
 // ================= 開始 =================
 window.__truck = { S, get save() { return save; }, hit: () => hitTest(S.x, S.z, S.heading, S.trailerHeading), boxes, input,
-  step(n = 60) { for (let i = 0; i < n; i++) frame(1 / 60); }, applyEnv, openGarage, closeGarage };
+  step(n = 60) { for (let i = 0; i < n; i++) frame(1 / 60); }, applyEnv, openGarage, closeGarage, traffic };
 newMission();
 rebuildRig(save.truck);
 applyEnv();

@@ -6,6 +6,7 @@ import { rng, makeNoise, clamp, canvasTex, FONT } from './util.js';
 import {
   asphaltTex, noiseBumpTex, concreteTex, grassTex, facadeTex, corrugatedTex, boardTex, gravelTex, fieldTex, stripeTex, ledTex,
 } from './textures.js';
+import { naturalHeight, terrainHeight, buildHighway, LUMBER, nearHighway, inCity } from './highway.js';
 
 export const ROADS = [-240, -80, 80, 240];
 export const ROAD_W = 14;
@@ -18,6 +19,7 @@ export const DEPOTS = [
   { name: '建材行', emoji: '🧱', x: -160, z: -102, bx: -160, bz: -126, color: '#b5651d', kind: 'site' },
   { name: '玩具店', emoji: '🧸', x: 102, z: 170, bx: 126, bz: 170, color: '#d81b60', kind: 'shop' },
   { name: '冰店', emoji: '🍦', x: -100, z: 264, bx: -100, bz: 287, color: '#0288d1', kind: 'shop' },
+  LUMBER, // 山上林場（走國道、過收費站和隧道）
 ];
 export const GAS = { x: -58, z: 30, name: '加油站' };
 export const GARAGE_BLD = { x: 122, z: -34 };
@@ -25,12 +27,15 @@ export const SPAWN = { x: 80 - 3.5, z: -30, heading: 0 };
 export const SHOWROOM = { x: 0, y: -400, z: 0 };
 
 const N = makeNoise(42);
-export function heightAt(x, z) {
-  const d = Math.max(Math.abs(x), Math.abs(z));
-  const t = clamp((d - 360) / 520, 0, 1);
-  if (t <= 0) return 0;
-  const ridge = N.fbm(x / 420 + 10, z / 420 - 3, 5), hills = N.fbm(x / 110, z / 110, 3);
-  return t * t * (90 + ridge * 520) + t * hills * 45;
+export const heightAt = naturalHeight;
+const cGrass = new THREE.Color(0x56703a), cForest = new THREE.Color(0x2f4a2a), cRock = new THREE.Color(0x6f6a62), cSnow = new THREE.Color(0xeef2f5);
+function terrainColor(x, z, h, out) {
+  const n = N.n2(x / 30, z / 30);
+  if (h < 25) out.copy(cGrass).lerp(cForest, clamp(h / 25, 0, 1) * 0.7);
+  else if (h < 170) out.copy(cForest).lerp(cRock, clamp((h - 120) / 50, 0, 1));
+  else if (h < 300) out.copy(cRock).lerp(cSnow, clamp((h - 270) / 30, 0, 1));
+  else out.copy(cSnow);
+  return out.multiplyScalar(0.85 + n * 0.3);
 }
 export function onRoad(x, z) {
   if (Math.abs(x) > 300 || Math.abs(z) > 300) return false;
@@ -38,6 +43,7 @@ export function onRoad(x, z) {
 }
 const GRAVEL_ZONES = [];
 export function surfaceAt(x, z) {
+  if (!inCity(x, z)) return 'road'; // 城外只能開在國道上
   if (onRoad(x, z)) return 'road';
   if (Math.hypot(x - GAS.x, z - GAS.z) < 14) return 'road';
   for (const d of DEPOTS) if (Math.abs(x - d.x) < 12 && Math.abs(z - d.z) < 12) return 'road';
@@ -97,16 +103,11 @@ export function buildWorld(scene, quality) {
   const seg = quality === 'low' ? 110 : 170;
   const tg = new THREE.PlaneGeometry(3400, 3400, seg, seg); tg.rotateX(-Math.PI / 2);
   const tp = tg.attributes.position, cols = new Float32Array(tp.count * 3);
-  const cGrass = new THREE.Color(0x56703a), cForest = new THREE.Color(0x2f4a2a), cRock = new THREE.Color(0x6f6a62), cSnow = new THREE.Color(0xeef2f5), tmp = new THREE.Color();
+  const tmp = new THREE.Color();
   for (let i = 0; i < tp.count; i++) {
-    const x = tp.getX(i), z = tp.getZ(i), h = heightAt(x, z);
+    const x = tp.getX(i), z = tp.getZ(i), h = terrainHeight(x, z);
     tp.setY(i, h - 0.08);
-    const n = N.n2(x / 30, z / 30);
-    if (h < 25) tmp.copy(cGrass).lerp(cForest, clamp(h / 25, 0, 1) * 0.7);
-    else if (h < 170) tmp.copy(cForest).lerp(cRock, clamp((h - 120) / 50, 0, 1));
-    else if (h < 300) tmp.copy(cRock).lerp(cSnow, clamp((h - 270) / 30, 0, 1));
-    else tmp.copy(cSnow);
-    tmp.multiplyScalar(0.85 + n * 0.3);
+    terrainColor(x, z, Math.max(0, h), tmp);
     cols[i * 3] = tmp.r; cols[i * 3 + 1] = tmp.g; cols[i * 3 + 2] = tmp.b;
   }
   tg.setAttribute('color', new THREE.BufferAttribute(cols, 3)); tg.computeVertexNormals();
@@ -237,6 +238,7 @@ export function buildWorld(scene, quality) {
   const bayMat = new THREE.MeshStandardMaterial({ map: bayTex, transparent: true, roughness: 0.7, depthWrite: false });
   const pg = new THREE.PlaneGeometry(24, 24); pg.rotateX(-Math.PI / 2);
   for (const d of DEPOTS) {
+    if (d.kind === 'lumber') continue; // 林場在 highway.js 蓋
     mesh(pg, apronMat, d.x, 0.03, d.z, root, { cast: false });
     const bay = mesh(pg, bayMat, d.x, 0.05, d.z, root, { cast: false });
     const ry = Math.atan2(d.x - d.bx, d.z - d.bz); // 建築物朝向裝卸區
@@ -377,6 +379,7 @@ export function buildWorld(scene, quality) {
       t++;
       const x = (R() * 2 - 1) * area, z = (R() * 2 - 1) * area, h = heightAt(x, z);
       if (h < minH || h > maxH) continue;
+      if (nearHighway(x, z)) continue;
       if (Math.max(Math.abs(x), Math.abs(z)) < 305) {
         if (ROADS.some((r) => Math.abs(x - r) < 12 || Math.abs(z - r) < 12)) continue;
         if (keepAway.some(([kx, kz, d]) => Math.hypot(x - kx, z - kz) < d * 0.7)) continue;
@@ -395,8 +398,15 @@ export function buildWorld(scene, quality) {
   placeTrees(quality === 'low' ? 250 : 450, 300, -1, 1, round, roundM);
   placeTrees(quality === 'low' ? 900 : 2200, 1200, 8, 160, pine, pineM);
 
-  // ---------- 路燈 ----------
+  // ---------- 城外國道、收費站、隧道、林場 ----------
   const lampSpots = [];
+  buildHighway(root, {
+    stdMat, colorAt: terrainColor, bayMat, lamps: lampSpots, quality,
+    wet: (mat, dry, wet, wetColor) => wetMats.push({ mat, dry, wet, dryColor: mat.color.clone(), wetColor }),
+    night: (mat, on) => nightMats.push({ mat, on }),
+  });
+
+  // ---------- 路燈 ----------
   for (const line of ROADS) {
     const inner = Math.abs(line) === 80, step = inner ? 34 : 50;
     for (let a = -290, i = 0; a <= 290; a += step, i++) {
@@ -422,11 +432,12 @@ export function buildWorld(scene, quality) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
   lampSpots.forEach((l, i) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), l.ry);
-    m4.compose(new THREE.Vector3(l.x, 0, l.z), q, one);
+    const y = l.y || 0;
+    m4.compose(new THREE.Vector3(l.x, y, l.z), q, one);
     poles.setMatrixAt(i, m4); arms.setMatrixAt(i, m4); heads.setMatrixAt(i, m4);
     const hx = l.x + Math.sin(l.ry) * 2.4, hz = l.z + Math.cos(l.ry) * 2.4;
-    lampHeads.push(new THREE.Vector3(hx, 8.6, hz));
-    m4.makeTranslation(hx, 0.06, hz); lampPools.setMatrixAt(i, m4);
+    lampHeads.push(new THREE.Vector3(hx, y + 8.6, hz));
+    m4.makeTranslation(hx, y + 0.06, hz); lampPools.setMatrixAt(i, m4);
   });
   root.add(poles, arms, heads, lampPools);
 

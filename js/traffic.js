@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ROADS, lightState, hasLight } from './world.js';
 import { rng } from './util.js';
+import { hwAt, LEN as HW_LEN, TOLL_S } from './highway.js';
 
 const LANE = 3.5;
 const COLORS = ['#f2f2f2', '#c9ccd1', '#1c1c1f', '#2b3a55', '#8a1f1f', '#5b6770', '#d9d1c0', '#0f4c5c', '#e8e8e8', '#3d3d3d'];
@@ -53,7 +54,7 @@ function makeCar(type, colorIdx) {
   return { g, len };
 }
 
-export function createTraffic(scene, count = 16) {
+export function createTraffic(scene, count = 16, hwCount = 4) {
   const r = rng(555);
   const cars = [];
   const types = ['sedan', 'sedan', 'suv', 'van'];
@@ -64,6 +65,34 @@ export function createTraffic(scene, count = 16) {
     // 起點：兩個路口之間
     const seg = Math.floor(r() * 3), a = ROADS[seg] + 12, b = ROADS[seg + 1] - 12;
     cars.push({ g, len, axis, line, dir, s: a + r() * (b - a), v: 8, vmax: 10 + r() * 4, turn: null, stall: 0 });
+  }
+  // 國道上的車（往西開回市區、往東開到林場前面迴轉）
+  const hwCars = [];
+  for (let i = 0; i < hwCount; i++) {
+    const { g, len } = makeCar(types[(i + 1) % types.length], Math.floor(r() * COLORS.length));
+    g.rotation.order = 'YXZ'; scene.add(g);
+    hwCars.push({ g, len, dir: i % 2 ? 1 : -1, s: 130 + r() * (HW_LEN - 280), v: 12, vmax: 15 + r() * 5, hw: true, ut: null, stall: 0 });
+  }
+  let ALL = cars.concat(hwCars);
+  const allCars = () => ALL;
+  const UT_S = HW_LEN - 92, UT_R = 3.5; // 林場前面迴轉
+  // 卡在原地太久（例如卡車停在路中間擋住）：換到離卡車很遠的地方
+  const STALL_MAX = 25;
+  function respawnFar(c, me) {
+    for (let k = 0; k < 30; k++) {
+      let p;
+      if (c.hw) { const s = 120 + r() * (UT_S - 150), d = r() < 0.5 ? 1 : -1; p = hwAt(s, d * 3.5); if (far(p, me)) { Object.assign(c, { s, dir: d, ut: null, v: 0, stall: 0 }); return; } }
+      else {
+        const axis = r() < 0.5 ? 'z' : 'x', line = ROADS[Math.floor(r() * 4)], dir = r() < 0.5 ? 1 : -1, seg = Math.floor(r() * 3);
+        const s = ROADS[seg] + 14 + r() * 132; p = lanePos(axis, line, dir, s);
+        if (far(p, me)) { Object.assign(c, { axis, line, dir, s, turn: null, passed: null, v: 0, stall: 0 }); return; }
+      }
+    }
+    c.stall = 0;
+  }
+  function far(p, me) {
+    if (Math.hypot(p.x - me.x, p.z - me.z) < 140) return false;
+    return !allCars().some((o) => Math.hypot(o.g.position.x - p.x, o.g.position.z - p.z) < 15);
   }
 
   function nextCross(c) {
@@ -76,6 +105,7 @@ export function createTraffic(scene, count = 16) {
   function startTurn(c, cross) {
     const opts = [];
     if (ROADS.includes(cross + c.dir * 160)) opts.push({ straight: true });
+    if (c.axis === 'x' && c.line === -80 && c.dir > 0 && cross === 240) opts.push({ straight: true }, { straight: true }); // 往東直走上國道
     for (const nd of [1, -1]) if (ROADS.includes(c.line + nd * 160)) opts.push({ nd });
     const o = opts[Math.floor(r() * opts.length)];
     if (!o || o.straight) { c.passed = cross; return; }
@@ -94,7 +124,7 @@ export function createTraffic(scene, count = 16) {
       const dx = p.x - pos.x, dz = p.z - pos.z, f = dx * fwd.x + dz * fwd.z, l = Math.abs(dx * fwd.z - dz * fwd.x);
       if (f > 0 && f < 30 && l < 3.0) d = Math.min(d, f - c.len / 2 - 3.5);
     }
-    for (const o of cars) {
+    for (const o of allCars()) {
       if (o === c) continue;
       const op = o.g.position, dx = op.x - pos.x, dz = op.z - pos.z, f = dx * fwd.x + dz * fwd.z, l = Math.abs(dx * fwd.z - dz * fwd.x);
       if (f > 0 && f < 30 && l < 1.8) d = Math.min(d, f - (c.len + o.len) / 2 - 2.5);
@@ -103,6 +133,8 @@ export function createTraffic(scene, count = 16) {
   }
 
   function update(dt, t, rigPts, night) {
+    ALL = cars.concat(hwCars);
+    const toHw = [], toCity = [];
     for (const c of cars) {
       let pos, h;
       if (c.turn) {
@@ -131,16 +163,66 @@ export function createTraffic(scene, count = 16) {
       target = Math.min(target, brakeV);
       c.v += Math.max(-8 * dt, Math.min(2.5 * dt, target - c.v));
       if (c.v < 0) c.v = 0;
+      c.stall = c.v < 0.2 ? c.stall + dt : 0;
+      if (c.stall > STALL_MAX) { respawnFar(c, rigPts[0]); continue; }
       if (c.turn) {
         c.turn.t += (c.v * dt) / c.turn.len;
         if (c.turn.t >= 1) { const T = c.turn; c.axis = T.naxis; c.line = T.nline; c.dir = T.nd; c.s = T.ns; c.passed = null; c.turn = null; }
       } else {
         c.s += c.v * c.dir * dt;
         // 跑出地圖就換到別條路
-        if (Math.abs(c.s) > 300) { c.dir = -c.dir; c.s = Math.sign(c.s) * 299; }
+        if (c.axis === 'x' && c.line === -80 && c.dir > 0 && c.s > 300) toHw.push(c); // 往東開上國道
+        else if (Math.abs(c.s) > 300) { c.dir = -c.dir; c.s = Math.sign(c.s) * 299; }
       }
       c.g.position.set(pos.x, 0, pos.z); c.g.rotation.y = h;
     }
+    // 國道上的車：往西開到市區就變回市區的車；往東開到林場前面迴轉
+    const place = (c) => {
+      if (c.ut !== null) {
+        const th = c.ut, Q = hwAt(UT_S + UT_R * Math.sin(th), UT_R * Math.cos(th));
+        const fx = Math.sin(Q.hd), fz = Math.cos(Q.hd), rx = -fz, rz = fx;
+        const dx = fx * Math.cos(th) - rx * Math.sin(th), dz = fz * Math.cos(th) - rz * Math.sin(th);
+        return { x: Q.x, y: Q.y, z: Q.z, h: Math.atan2(dx, dz), grade: 0 };
+      }
+      const Q = hwAt(c.s, c.dir * 3.5);
+      return { x: Q.x, y: Q.y, z: Q.z, h: c.dir > 0 ? Q.hd : Q.hd + Math.PI, grade: Q.grade * c.dir };
+    };
+    for (const c of hwCars) {
+      const P = place(c);
+      const pos = { x: P.x, z: P.z }, fwd = { x: Math.sin(P.h), z: Math.cos(P.h) };
+      let free = obstacleAhead(c, pos, fwd, rigPts);
+      let target = c.ut !== null ? 3 : c.s > 110 ? c.vmax * 0.75 : c.vmax;
+      if (c.ut === null && Math.abs(c.s - TOLL_S) < 40) target = 4.5; // 收費站慢慢過
+      if (c.ut === null && c.dir > 0 && c.s > UT_S - 30) target = Math.min(target, 5);
+      const brakeV = free < 0 ? 0 : Math.sqrt(2 * 5 * Math.max(0, free));
+      target = Math.min(target, brakeV);
+      c.v += Math.max(-8 * dt, Math.min(2.5 * dt, target - c.v));
+      if (c.v < 0) c.v = 0;
+      c.stall = c.v < 0.2 ? c.stall + dt : 0;
+      if (c.stall > STALL_MAX) respawnFar(c, rigPts[0]);
+      if (c.ut !== null) {
+        c.ut += (c.v * dt) / UT_R;
+        if (c.ut >= Math.PI) { c.ut = null; c.dir = -1; c.s = UT_S; }
+      } else {
+        c.s += c.v * c.dir * dt;
+        if (c.dir > 0 && c.s >= UT_S) { c.s = UT_S; c.ut = 0; }
+        if (c.dir < 0 && c.s < 0) toCity.push(c);
+      }
+      const Q = place(c);
+      c.g.position.set(Q.x, Q.y, Q.z);
+      c.g.rotation.set(-Math.atan(Q.grade), Q.h, 0);
+    }
+    for (const c of toHw) {
+      cars.splice(cars.indexOf(c), 1); hwCars.push(c);
+      Object.assign(c, { hw: true, ut: null, dir: 1, s: Math.max(0, c.s - 300), vmax: 15 + r() * 5, turn: null, stall: 0 });
+      c.g.rotation.order = 'YXZ';
+    }
+    for (const c of toCity) {
+      hwCars.splice(hwCars.indexOf(c), 1); cars.push(c);
+      Object.assign(c, { hw: false, ut: null, axis: 'x', line: -80, dir: -1, s: 300 + c.s, turn: null, passed: null, vmax: 10 + r() * 4, stall: 0 });
+      c.g.rotation.x = 0;
+    }
+    ALL = cars.concat(hwCars);
     const s = shared();
     s.head.emissiveIntensity = night ? 4 : 0.2; s.tail.emissiveIntensity = night ? 1.5 : 0.2;
   }
@@ -148,13 +230,13 @@ export function createTraffic(scene, count = 16) {
   // 碰撞用：每台車兩個圓
   function circles() {
     const out = [];
-    for (const c of cars) {
+    for (const c of allCars()) {
       const p = c.g.position, h = c.g.rotation.y, fx = Math.sin(h), fz = Math.cos(h), o = c.len / 2 - 1.0;
       out.push({ x: p.x + fx * o, z: p.z + fz * o, r: 1.1, car: c }, { x: p.x - fx * o, z: p.z - fz * o, r: 1.1, car: c });
     }
     return out;
   }
-  function positions() { return cars.map((c) => c.g.position); }
-  function setVisible(v) { cars.forEach((c) => (c.g.visible = v)); }
+  function positions() { return allCars().map((c) => c.g.position); }
+  function setVisible(v) { allCars().forEach((c) => (c.g.visible = v)); }
   return { update, circles, positions, setVisible };
 }

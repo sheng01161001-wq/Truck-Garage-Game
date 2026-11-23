@@ -93,13 +93,22 @@ export function createEnv(renderer, scene) {
     envRT = pmrem.fromScene(envScene, 0, 0.1, 3000);
     scene.environment = envRT.texture;
     scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1);
+    state.hemiBase = hemi.intensity; state.envBase = scene.environmentIntensity;
     for (let i = 0; i < RAIN; i++) resetDrop(i, 0, 0, 0, true);
     return state;
   }
 
-  function update(dt, focus, cam) {
+  // covered＝鏡頭在隧道裡：天空光變暗、不下雨
+  function update(dt, focus, cam, covered = false) {
     sun.position.copy(focus).addScaledVector(lightDir, 200);
     sun.target.position.copy(focus);
+    const c0 = state.cov || 0;
+    state.cov = c0 + ((covered ? 1 : 0) - c0) * Math.min(1, dt * 3);
+    if (state.hemiBase !== undefined) {
+      hemi.intensity = state.hemiBase * (1 - 0.75 * state.cov);
+      scene.environmentIntensity = state.envBase * (1 - 0.75 * state.cov);
+    }
+    if (!state.indoor) rain.visible = state.weather === 'rain' && state.cov < 0.5;
     if (rain.visible) {
       for (let i = 0; i < RAIN; i++) {
         const dy = rv[i] * dt;

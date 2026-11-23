@@ -1,6 +1,7 @@
 // 儀表板（轉速表、速度表、檔位、油量、水溫、損傷）、GPS 小地圖與導航路線
 import { ROADS, ROAD_W, DEPOTS, GAS, GARAGE_BLD } from './world.js';
 import { clamp, roundRectPath } from './util.js';
+import { PTS as HW_PTS, hwProject, inCity, LEN as HW_LEN } from './highway.js';
 
 // ---------- 導航：沿著道路找最短路 ----------
 function nearestRoadPoint(x, z) {
@@ -13,7 +14,7 @@ function nearestRoadPoint(x, z) {
   return best;
 }
 const key = (x, z) => x + ',' + z;
-export function computeRoute(from, to) {
+function gridRoute(from, to) {
   const A = nearestRoadPoint(from.x, from.z), B = nearestRoadPoint(to.x, to.z);
   const nodes = new Map(), edges = new Map();
   const addNode = (id, x, z) => { if (!nodes.has(id)) { nodes.set(id, { x, z }); edges.set(id, []); } };
@@ -46,6 +47,26 @@ export function computeRoute(from, to) {
   let cur = 'G';
   while (cur) { path.unshift(nodes.get(cur)); cur = prev.get(cur); if (cur === undefined) break; }
   const pts = [{ x: from.x, z: from.z }, ...path, { x: to.x, z: to.z }];
+  return pts;
+}
+// 國道上從 s0 走到 s1 的點（每 12 公尺一點）
+function hwSlice(s0, s1) {
+  const out = [], a = clamp(s0, 0, HW_LEN), b = clamp(s1, 0, HW_LEN), step = a < b ? 12 : -12;
+  for (let s = a; (b - s) * Math.sign(step) > 0; s += step) { const p = HW_PTS[Math.round(s / 4)]; out.push({ x: p.x, z: p.z }); }
+  const e = HW_PTS[Math.round(b / 4)]; out.push({ x: e.x, z: e.z });
+  return out;
+}
+export function computeRoute(from, to) {
+  const fOut = !inCity(from.x, from.z), tOut = !inCity(to.x, to.z);
+  let pts;
+  if (!fOut && !tOut) pts = gridRoute(from, to);
+  else {
+    const fs = fOut ? hwProject(from.x, from.z).s : 0, ts = tOut ? hwProject(to.x, to.z).s : 0;
+    const gate = HW_PTS[0];
+    if (fOut && tOut) pts = [{ x: from.x, z: from.z }, ...hwSlice(fs, ts), { x: to.x, z: to.z }];
+    else if (fOut) pts = [{ x: from.x, z: from.z }, ...hwSlice(fs, 0), ...gridRoute({ x: gate.x, z: gate.z }, to)];
+    else pts = [...gridRoute(from, { x: gate.x, z: gate.z }), ...hwSlice(0, ts), { x: to.x, z: to.z }];
+  }
   let len = 0; for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
   return { pts, len };
 }
@@ -63,6 +84,10 @@ export function drawMinimap(cv, st) {
   ctx.setTransform(a, b, c, d, e, f);
   ctx.strokeStyle = st.night ? '#4a5866' : '#8e979f'; ctx.lineWidth = ROAD_W; ctx.lineCap = 'butt';
   for (const r of ROADS) { ctx.beginPath(); ctx.moveTo(r, -300); ctx.lineTo(r, 300); ctx.moveTo(-300, r); ctx.lineTo(300, r); ctx.stroke(); }
+  ctx.lineJoin = 'round'; ctx.beginPath(); HW_PTS.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z))); ctx.stroke();
+  for (const p of HW_PTS) if (p.w > 7.5) { ctx.lineWidth = p.w * 2; ctx.beginPath(); ctx.moveTo(p.x - p.fx * 2.2, p.z - p.fz * 2.2); ctx.lineTo(p.x + p.fx * 2.2, p.z + p.fz * 2.2); ctx.stroke(); }
+  ctx.strokeStyle = st.night ? '#2a3038' : '#5d646b'; ctx.lineWidth = ROAD_W * 0.9;
+  for (const p of HW_PTS) if (p.tun) { ctx.beginPath(); ctx.moveTo(p.x - p.fx * 2.2, p.z - p.fz * 2.2); ctx.lineTo(p.x + p.fx * 2.2, p.z + p.fz * 2.2); ctx.stroke(); }
   if (st.route) {
     ctx.strokeStyle = '#ff9f1c'; ctx.lineWidth = 6; ctx.lineJoin = 'round';
     ctx.beginPath(); st.route.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z))); ctx.stroke();
