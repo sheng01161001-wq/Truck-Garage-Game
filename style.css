@@ -159,6 +159,12 @@ body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: non
 .job button { margin-top: auto; padding: 11px; border: 0; border-radius: 10px; background: linear-gradient(135deg,#ffd77f,#e99a2b); color: #17191c; font-size: 16px; font-weight: 900; cursor: pointer; }
 @media (max-width: 640px) { .jobs { grid-template-columns: 1fr; } }
 .m-time { color: #9be7b0; font-weight: 800; } .m-time.late { color: #ff8a80; } .m-dmg { color: #ffb020; }
+/* v29：財務長條圖 */
+.fin-bars { display: flex; align-items: flex-end; gap: 6px; height: 100px; padding: 6px 2px 0; }
+.fin-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.fin-bar i { display: block; width: 100%; max-width: 26px; border-radius: 4px 4px 0 0; }
+.fin-bar i.up { background: linear-gradient(#80e0a5, #2e9d5b); } .fin-bar i.down { background: linear-gradient(#ff9b9b, #c0392b); }
+.fin-bar small { font-size: 9px; color: #9eacb9; margin-top: 3px; white-space: nowrap; }
 #ver { position: fixed; left: 8px; bottom: 2px; font-size: 11px; color: rgba(255,255,255,.4); z-index: 5; pointer-events: none; }
 
 

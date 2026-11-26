@@ -1,4 +1,4 @@
-// 卡車改裝王 v28（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v29（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v28';
+const VERSION = 'v29';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -153,13 +153,15 @@ function loadSave() {
     if (s.company && typeof s.company === 'object') {
       const c = s.company;
       if (typeof c.name === 'string') out.company.name = c.name.slice(0, 20);
-      if (Number.isFinite(c.trucks)) out.company.trucks = clamp(Math.floor(c.trucks), 1, 5);
+      if (Number.isFinite(c.trucks)) out.company.trucks = clamp(Math.floor(c.trucks), 1, 8);
+      if (Number.isFinite(c.warehouse)) out.company.warehouse = clamp(Math.floor(c.warehouse), 0, 3);
+      if (Array.isArray(c.history)) out.company.history = c.history.slice(-12).filter((v) => v && Number.isFinite(v.v)).map((v) => ({ n: String(v.n || '').slice(0, 6), v: Math.round(v.v) }));
       if (Number.isFinite(c.engineLevel)) out.company.engineLevel = clamp(Math.floor(c.engineLevel), 0, 3);
       if (Number.isFinite(c.fuelLevel)) out.company.fuelLevel = clamp(Math.floor(c.fuelLevel), 0, 3);
       for (const k of ['revenue', 'expenses', 'contracts', 'wages', 'maintenance', 'fuelCost']) if (Number.isFinite(c[k])) out.company[k] = Math.max(0, Math.floor(c[k]));
       if (Number.isInteger(c.queuedCargo) && c.queuedCargo >= 0 && c.queuedCargo < 12) out.company.queuedCargo = c.queuedCargo;
       if (Array.isArray(c.fleetLog)) out.company.fleetLog = c.fleetLog.slice(0,20).filter(v=>v&&typeof v.message==='string').map(v=>({time:Number.isFinite(v.time)?v.time:Date.now(),message:String(v.message).slice(0,100)}));
-      if (Array.isArray(c.fleetUnits)) out.company.fleetUnits = c.fleetUnits.slice(0, 4).filter(u => u && typeof u.id === 'string').map((u,i) => ({ id:u.id.slice(0,48), name:String(u.name||`車隊 ${i+1}`).slice(0,16), driver:String(u.driver||'待指派司機').slice(0,16), paint:/^#[0-9a-f]{6}$/i.test(u.paint)?u.paint:['#b71c1c','#145da0','#d18a16','#315b45'][i%4], plate:String(u.plate||`BK-${String(i+1).padStart(3,'0')}`).replace(/[^a-zA-Z0-9-]/g,'').slice(0,10), status:['idle','outbound','returning'].includes(u.status)?u.status:'idle', progress:clamp(Number(u.progress)||0,0,1), duration:clamp(Number(u.duration)||90,45,180), fuel:clamp(Number(u.fuel??1),0,1), condition:clamp(Number(u.condition??1),0,1), cargoIndex:Number.isInteger(u.cargoIndex)?clamp(u.cargoIndex,0,11):null, origin:Number.isInteger(u.origin)?clamp(u.origin,0,DEPOTS.length-1):null, destination:Number.isInteger(u.destination)?clamp(u.destination,0,DEPOTS.length-1):null, reward:Math.max(0,Math.floor(Number(u.reward)||0)), earned:Math.max(0,Math.floor(Number(u.earned)||0)), phase:['outbound','unloading','returning'].includes(u.phase)?u.phase:'outbound', stopTimer:clamp(Number(u.stopTimer)||0,0,20), driverState:String(u.driverState||'待命').slice(0,16), fatigue:clamp(Number(u.fatigue)||0,0,1), incidents:Math.max(0,Math.floor(Number(u.incidents)||0)), lastEvent:String(u.lastEvent||'車輛已完成檢查').slice(0,48), eventChecked:!!u.eventChecked }));
+      if (Array.isArray(c.fleetUnits)) out.company.fleetUnits = c.fleetUnits.slice(0, 7).filter(u => u && typeof u.id === 'string').map((u,i) => ({ id:u.id.slice(0,48), name:String(u.name||`車隊 ${i+1}`).slice(0,16), driver:String(u.driver||'待指派司機').slice(0,16), paint:/^#[0-9a-f]{6}$/i.test(u.paint)?u.paint:['#b71c1c','#145da0','#d18a16','#315b45'][i%4], plate:String(u.plate||`BK-${String(i+1).padStart(3,'0')}`).replace(/[^a-zA-Z0-9-]/g,'').slice(0,10), status:['idle','outbound','returning'].includes(u.status)?u.status:'idle', progress:clamp(Number(u.progress)||0,0,1), duration:clamp(Number(u.duration)||90,45,180), fuel:clamp(Number(u.fuel??1),0,1), condition:clamp(Number(u.condition??1),0,1), cargoIndex:Number.isInteger(u.cargoIndex)?clamp(u.cargoIndex,0,11):null, origin:Number.isInteger(u.origin)?clamp(u.origin,0,DEPOTS.length-1):null, destination:Number.isInteger(u.destination)?clamp(u.destination,0,DEPOTS.length-1):null, reward:Math.max(0,Math.floor(Number(u.reward)||0)), earned:Math.max(0,Math.floor(Number(u.earned)||0)), phase:['outbound','unloading','returning'].includes(u.phase)?u.phase:'outbound', stopTimer:clamp(Number(u.stopTimer)||0,0,20), driverState:String(u.driverState||'待命').slice(0,16), fatigue:clamp(Number(u.fatigue)||0,0,1), incidents:Math.max(0,Math.floor(Number(u.incidents)||0)), lastEvent:String(u.lastEvent||'車輛已完成檢查').slice(0,48), eventChecked:!!u.eventChecked, model:['light','std','heavy'].includes(u.model)?u.model:'std', skill:clamp(Math.floor(Number(u.skill)||1),1,3) }));
     }
     if (Number.isFinite(s.deliveries)) out.deliveries = s.deliveries;
     if (s.jobs && typeof s.jobs === 'object') out.jobs = { done: Math.max(0, Math.floor(Number(s.jobs.done) || 0)), stars: Math.max(0, Math.floor(Number(s.jobs.stars) || 0)) }; // v28 任務評價紀錄
@@ -185,7 +187,28 @@ function loadSave() {
 }
 let save = loadSave();
 const FLEET_DRIVERS = ['阿哲','志明','小宇','建宏','阿凱','家豪'];
-function createFleetUnit(index) { return { id:`fleet-${Date.now()}-${index}-${Math.random().toString(36).slice(2,6)}`, name:`物流車 ${index+1}`, driver:FLEET_DRIVERS[index % FLEET_DRIVERS.length], paint:['#b71c1c','#145da0','#d18a16','#315b45'][index%4], plate:`BK-${String(index+1).padStart(3,'0')}`, driverState:'待命', fatigue:0, incidents:0, lastEvent:'車輛已完成檢查', eventChecked:false, status:'idle', progress:0, duration:90, fuel:1, condition:1, cargoIndex:null, origin:null, destination:null, reward:0, earned:0, phase:'outbound' }; }
+function createFleetUnit(index, model = 'std') { return { model, skill: 1, id:`fleet-${Date.now()}-${index}-${Math.random().toString(36).slice(2,6)}`, name:`物流車 ${index+1}`, driver:FLEET_DRIVERS[index % FLEET_DRIVERS.length], paint:['#b71c1c','#145da0','#d18a16','#315b45'][index%4], plate:`BK-${String(index+1).padStart(3,'0')}`, driverState:'待命', fatigue:0, incidents:0, lastEvent:'車輛已完成檢查', eventChecked:false, status:'idle', progress:0, duration:90, fuel:1, condition:1, cargoIndex:null, origin:null, destination:null, reward:0, earned:0, phase:'outbound' }; }
+// v29：車款（價錢、運費倍數、速度）、司機技術、倉庫
+const TRUCK_MODELS = { light: { name: '小型貨車', price: 5000, mult: 0.75, speed: 1.1 }, std: { name: '標準聯結車', price: 9000, mult: 1, speed: 1 }, heavy: { name: '重型聯結車', price: 15000, mult: 1.4, speed: 0.92 } };
+const WAREHOUSE = [{ name: '沒有倉庫', income: 0 }, { name: '小倉庫', income: 40, cost: 4000 }, { name: '物流倉庫', income: 90, cost: 9000 }, { name: '大型物流中心', income: 160, cost: 18000 }];
+const fleetCap = () => 5 + (save.company.warehouse || 0);
+const truckPrice = (model) => Math.round(TRUCK_MODELS[model].price * (1 + 0.25 * Math.max(0, save.company.trucks - 1)) / 100) * 100;
+const DRIVER_NAMES = ['阿哲', '志明', '小宇', '建宏', '阿凱', '家豪', '美玲', '雅婷', '大雄', '阿明', '小芳', '俊傑'];
+let driverPool = null;
+function makeDrivers() { driverPool = [0, 1, 2].map(() => { const skill = 1 + Math.floor(Math.random() * 3); return { name: DRIVER_NAMES[Math.floor(Math.random() * DRIVER_NAMES.length)], skill, fee: skill * 350 + Math.floor(Math.random() * 6) * 20 }; }); }
+function addHistory(n, v) { save.company.history = (save.company.history || []).concat([{ n, v: Math.round(v) }]).slice(-12); }
+function companyExtraHtml() {
+  const c = save.company; if (!driverPool) makeDrivers();
+  const wl = c.warehouse || 0, next = WAREHOUSE[wl + 1];
+  const hist = c.history || [], mx = Math.max(50, ...hist.map((h) => Math.abs(h.v)));
+  const units = c.fleetUnits.filter((u) => u.status === 'idle');
+  return `<div class="company-section"><b>👷 司機招募</b><small>技術越好（星星越多）跑得越快、越少出事，但每趟薪水比較高（30＋15×星）。雇用後會換掉一台待命車的司機。</small>
+    ${c.fleetUnits.length ? `<div class="contract-grid">${driverPool.map((d, i) => `<article class="contract-card"><div><b>${escapeHtml(d.name)}</b><span>${'⭐'.repeat(d.skill)}</span></div><small>簽約金 💰 ${d.fee}</small>${units.length ? `<label class="dispatch-pick">派到<select data-hire-unit="${i}">${units.map((u) => `<option value="${u.id}">${escapeHtml(u.name)}（現在 ${'⭐'.repeat(u.skill || 1)}）</option>`).join('')}</select></label><button data-hire="${i}">雇用</button>` : '<small>車都出去送貨了，回來才能換司機</small>'}</article>`).join('')}</div><button class="dispatch-go" data-hire-refresh>🔄 看看其他人（💰 50）</button>` : '<small>先買一台營運卡車才需要司機。</small>'}</div>
+    <div class="company-section"><b>🏬 倉庫</b><small>現在：${WAREHOUSE[wl].name}${wl ? `｜每 2 分鐘倉儲收入 💰 ${WAREHOUSE[wl].income}` : ''}｜車隊上限 ${fleetCap()} 台</small>
+    ${next ? `<div class="company-upgrade"><span>升級成「${next.name}」<br><small>每 2 分鐘收入 ${next.income}、車隊上限 +1</small></span><button data-company-action="warehouse">升級｜💰 ${next.cost}</button></div>` : '<small>已經是最大的物流中心了！</small>'}</div>
+    <div class="company-section"><b>📈 最近 12 筆收支</b><small>綠色是賺、紅色是賠（送貨、車隊、倉庫都算）。</small>
+    <div class="fin-bars">${hist.length ? hist.map((h) => `<div class="fin-bar" title="${escapeHtml(h.n)} ${h.v}"><i class="${h.v >= 0 ? 'up' : 'down'}" style="height:${Math.max(3, Math.round(Math.abs(h.v) / mx * 70))}px"></i><small>${escapeHtml(h.n)}</small></div>`).join('') : '<small>還沒有紀錄，送一趟貨就會出現。</small>'}</div></div>`;
+}
 function logFleetEvent(message) { save.company.fleetLog.unshift({ time: Date.now(), message: String(message).slice(0,100) }); save.company.fleetLog = save.company.fleetLog.slice(0,20); }
 while (save.company.fleetUnits.length < Math.max(0, save.company.trucks - 1)) save.company.fleetUnits.push(createFleetUnit(save.company.fleetUnits.length));
 save.company.fleetUnits = save.company.fleetUnits.slice(0, Math.max(0, save.company.trucks - 1));
@@ -280,7 +303,7 @@ function dispatchUnit(id, cargoIndex) {
   let a=Math.floor(Math.random()*DEPOTS.length), b; do{b=Math.floor(Math.random()*DEPOTS.length);}while(a===b);
   const A=DEPOTS[a],B=DEPOTS[b],cargo=CARGOS[cargoIndex],ct=CONTRACTS.find(v=>v.cargo===cargoIndex);
   const dist=Math.hypot(A.x-B.x,A.z-B.z),base=Math.round((80+dist*.45+cargo.t*4)/10)*10;
-  u.status='outbound';u.phase='outbound';u.stopTimer=0;u.driverState='執勤中';u.fatigue=clamp(u.fatigue+0.28,0,1);u.eventChecked=false;u.lastEvent='已出車，依導航前往目的地';u.progress=0;u.duration=clamp((58+dist*.12)*(1-save.company.engineLevel*.04),55,145);u.cargoIndex=cargoIndex;u.origin=a;u.destination=b;u.reward=Math.round(base*(ct?ct.multiplier:1));
+  u.status='outbound';u.phase='outbound';u.stopTimer=0;u.driverState='執勤中';u.fatigue=clamp(u.fatigue+0.28,0,1);u.eventChecked=false;u.lastEvent='已出車，依導航前往目的地';u.progress=0;const TM=TRUCK_MODELS[u.model||'std'];u.duration=clamp((58+dist*.12)*(1-save.company.engineLevel*.04)*(1-0.08*((u.skill||1)-1))/TM.speed,45,160);u.cargoIndex=cargoIndex;u.origin=a;u.destination=b;u.reward=Math.round(base*(ct?ct.multiplier:1)*TM.mult);
   logFleetEvent(`${u.name} 派遣：${A.name} → ${B.name}｜${cargo.n}`);persist();traffic.syncFleet(save.company.fleetUnits,save.company.name);renderGarage();toast(`${u.name} 已出車：${A.name} → ${B.name}`);Snd.buy();
 }
 function serviceFleetUnit(id, kind) {
@@ -299,19 +322,21 @@ function updateDispatchFleet(dt) {
     u.progress=Math.min(1,u.progress+dt/u.duration);
     if(u.progress>=1){
       if(u.status==='outbound'){
-        if(!u.eventChecked){u.eventChecked=true;if(Math.random()<0.16){u.incidents=(u.incidents||0)+1;u.condition=clamp(u.condition-0.08,0,1);u.lastEvent='途中輪胎／路況異常，已扣除車況並完成安全處置';logFleetEvent(`${u.name} 發生道路事件，車況下降`);toast(`⚠️ ${u.name} 發生道路事件，車隊已通報`);}else{u.lastEvent='貨物安全送達，沒有事故紀錄';}}
+        if(!u.eventChecked){u.eventChecked=true;if(Math.random()<0.16*(1-0.3*((u.skill||1)-1))+(u.condition<0.35?0.15:0)){u.incidents=(u.incidents||0)+1;u.condition=clamp(u.condition-0.08,0,1);u.lastEvent='途中輪胎／路況異常，已扣除車況並完成安全處置';logFleetEvent(`${u.name} 發生道路事件，車況下降`);toast(`⚠️ ${u.name} 發生道路事件，車隊已通報`);}else{u.lastEvent='貨物安全送達，沒有事故紀錄';}}
 
         const cargo=CARGOS[u.cargoIndex]||CARGOS[0],origin=DEPOTS[u.origin],dest=DEPOTS[u.destination];
-        const payout=Math.max(0,u.reward-35);save.coins+=payout;save.company.revenue+=u.reward;save.company.contracts++;u.earned+=u.reward;
+        const payout=Math.max(0,u.reward-35);save.coins+=payout;addHistory('車隊',payout);save.company.revenue+=u.reward;save.company.contracts++;u.earned+=u.reward;
         save.company.expenses+=35;save.company.fuelCost=(save.company.fuelCost||0)+35;u.fuel=clamp(u.fuel-.16*(1-save.company.fuelLevel*.1),0,1);u.condition=clamp(u.condition-.025,0,1);
         u.phase='unloading';u.stopTimer=4;u.driverState='裝卸作業';u.progress=1;u.lastEvent=`已抵達 ${dest.name}，正在卸貨`;logFleetEvent(`${u.name} 已抵達 ${dest.name}，完成 ${cargo.n} 交付`);
         toast(`🚛 ${u.name} 已送達 ${dest.name}｜${cargo.n} 淨入帳 +${payout}`);popup(`車隊淨收益 +${payout}`);Snd.coin();
       }else{
-        const wage=45, maintenance=25; save.company.wages=(save.company.wages||0)+wage; save.company.maintenance=(save.company.maintenance||0)+maintenance; save.company.expenses+=wage+maintenance; save.coins=Math.max(0,save.coins-wage-maintenance); u.status='idle';u.driverState=u.fatigue>0.72?'需要休息':'待命';u.progress=0;u.cargoIndex=null;u.origin=null;u.destination=null;u.reward=0;u.phase='outbound';u.lastEvent=`已返抵物流中心｜司機薪資 ${wage}、保養 ${maintenance}`;u.eventChecked=false;logFleetEvent(`${u.name} 完成往返任務｜薪資 ${wage}、保養 ${maintenance}`);toast(`🚛 ${u.name} 已返抵｜薪資與保養支出 ${wage+maintenance}`);
+        const wage=30+15*(u.skill||1), maintenance=u.condition<0.5?60:25; addHistory('薪資',-(wage+maintenance)); save.company.wages=(save.company.wages||0)+wage; save.company.maintenance=(save.company.maintenance||0)+maintenance; save.company.expenses+=wage+maintenance; save.coins=Math.max(0,save.coins-wage-maintenance); u.status='idle';u.driverState=u.fatigue>0.72?'需要休息':'待命';u.progress=0;u.cargoIndex=null;u.origin=null;u.destination=null;u.reward=0;u.phase='outbound';u.lastEvent=`已返抵物流中心｜司機薪資 ${wage}、保養 ${maintenance}`;u.eventChecked=false;logFleetEvent(`${u.name} 完成往返任務｜薪資 ${wage}、保養 ${maintenance}`);toast(`🚛 ${u.name} 已返抵｜薪資與保養支出 ${wage+maintenance}`);
       }
       changed=true;
     }
   }
+  // v29：倉庫每 2 分鐘的倉儲收入
+  const wl=save.company.warehouse||0; if(wl){ save.company.whT=(save.company.whT||0)+dt; if(save.company.whT>=120){ save.company.whT=0; const inc=WAREHOUSE[wl].income; save.coins+=inc; save.company.revenue+=inc; addHistory('倉庫',inc); logFleetEvent(`${WAREHOUSE[wl].name} 倉儲收入 +${inc}`); toast(`🏬 倉儲收入 +${inc}`,1400); changed=true; } }
   dispatchSaveT+=dt;dispatchUiT+=dt;
   if(changed||dispatchSaveT>=5){dispatchSaveT=0;persist();updateCoins();}
   if(dispatchUiT>=1.2){dispatchUiT=0;if(inGarage()&&S.gTab==='company'&&!$('#gBody').contains(document.activeElement))renderGarage();} // 正在選貨物／改車牌時不要重畫，不然選單會被關掉
@@ -423,7 +448,7 @@ function checkMission(dt) {
       if (m.speeding > 10) { stars--; notes.push(`超速 ${Math.round(m.speeding)} 秒`); }
       stars = clamp(stars, 1, 5);
       save.coins += payout; save.deliveries++;
-      save.jobs = save.jobs || { done: 0, stars: 0 }; save.jobs.done++; save.jobs.stars += stars;
+      save.jobs = save.jobs || { done: 0, stars: 0 }; save.jobs.done++; save.jobs.stars += stars; addHistory('送貨', payout);
       save.company.revenue += m.reward + bonus + timeBonus + fleetGross;
       save.company.expenses += fleetCost; save.company.contracts++;
       persist(); updateCoins();
@@ -657,7 +682,7 @@ function renderGarage() {
     const fuelLabel = c.fuelLevel >= 3 ? '已達最高等級' : `升級至 Lv.${c.fuelLevel + 1}｜💰 ${fuelCosts[c.fuelLevel]}`;
     const net = c.revenue - c.expenses;
     h = `<div class="company-hero"><div class="company-kicker">LOGISTICS MANAGEMENT / 物流營運中心</div><label>公司名稱<input id="companyName" maxlength="20" value="${escapeHtml(c.name)}"></label><div class="company-stats"><div><small>車隊車輛</small><b>🚛 ${c.trucks} / 5</b></div><div><small>完成趟次</small><b>${c.contracts}</b></div><div><small>累計營收</small><b>💰 ${c.revenue.toLocaleString()}</b></div><div><small>營運淨收益</small><b class="${net >= 0 ? 'positive' : 'negative'}">${net.toLocaleString()}</b></div></div></div>
-      <div class="company-section"><b>🚚 車隊擴編</b><small>每完成一趟親自承運的貨運，其他車輛會同步產生營收 120 金幣，並計入 45 金幣營運成本。</small><div class="company-upgrade"><span>新增一台營運卡車<br><small>目前 ${c.trucks} 台｜最多 5 台</small></span><button data-company-action="truck" ${c.trucks >= 5 ? 'disabled' : ''}>${c.trucks >= 5 ? '車隊已滿' : `購買｜💰 ${truckCost}`}</button></div></div>
+      <div class="company-section"><b>🚚 車隊擴編</b><small>每完成一趟親自承運的貨運，其他車輛會同步產生營收 120 金幣，並計入 45 金幣營運成本。</small><div class="company-upgrade"><span>新增一台營運卡車<br><small>目前 ${c.trucks} 台｜最多 ${fleetCap()} 台（升級倉庫可以多放）</small></span></div>${Object.entries(TRUCK_MODELS).map(([id, tm]) => `<div class="level-row"><span>${tm.name}<b>運費 ×${tm.mult}</b></span><button data-company-action="truck" data-model="${id}" ${c.trucks >= fleetCap() ? 'disabled' : ''}>${c.trucks >= fleetCap() ? '車隊已滿' : `購買｜💰 ${truckPrice(id)}`}</button></div>`).join('')}</div>${companyExtraHtml()}
       <div class="company-section"><b>⚙️ 動力升級</b><small>提升引擎輸出，載重起步與爬坡更有力。</small><div class="level-row"><span>引擎動力 <b>Lv.${c.engineLevel}/3</b></span><button data-company-action="engine" ${c.engineLevel >= 3 ? 'disabled' : ''}>${engineLabel}</button></div></div>
       <div class="company-section"><b>⛽ 節能升級</b><small>改善燃油效率，降低行駛時的油耗。</small><div class="level-row"><span>燃油效率 <b>Lv.${c.fuelLevel}/3</b></span><button data-company-action="fuel" ${c.fuelLevel >= 3 ? 'disabled' : ''}>${fuelLabel}</button></div></div>
       <div class="company-section"><b>📦 貨運合約 / CONTRACT BOARD</b><small>選擇專項貨物承運。若目前尚未裝貨，會以新合約取代原本待接任務；已裝貨則排入下一趟。</small><div class="contract-grid">${CONTRACTS.map((ct,i)=>{const cg=CARGOS[ct.cargo];return `<article class="contract-card"><div><b>${cg.n}</b><span>${ct.type}</span></div><small>${cg.t} 噸｜合約加成 +${Math.round((ct.multiplier-1)*100)}%</small><p>${ct.note}</p><button data-contract="${ct.cargo}">承接合約</button></article>`;}).join('')}</div></div>
@@ -757,6 +782,18 @@ $('#gBody').addEventListener('change', e => { const paint=e.target.closest('[dat
 
 // G：物流公司、車隊擴編、貨運合約與車輛升級
 $('#gBody').addEventListener('click', e => {
+  if (e.target.closest('[data-hire-refresh]')) { if (save.coins < 50) { toast('金幣不夠'); return; } save.coins -= 50; updateCoins(); makeDrivers(); renderGarage(); Snd.click(); return; }
+  const hire = e.target.closest('[data-hire]');
+  if (hire) {
+    const d = driverPool[Number(hire.dataset.hire)], sel = $(`[data-hire-unit="${hire.dataset.hire}"]`), u = save.company.fleetUnits.find((v) => v.id === sel?.value);
+    if (!d || !u) return;
+    if (save.coins < d.fee) { toast(`金幣不足，還差 ${d.fee - save.coins} 金幣`); return; }
+    save.coins -= d.fee; save.company.expenses += d.fee; addHistory('簽約', -d.fee);
+    logFleetEvent(`${u.name} 新司機 ${d.name}（${'⭐'.repeat(d.skill)}）上任，原司機 ${u.driver} 離職`);
+    u.driver = d.name; u.skill = d.skill; u.fatigue = 0; u.driverState = '待命';
+    driverPool.splice(Number(hire.dataset.hire), 1, (() => { const s2 = 1 + Math.floor(Math.random() * 3); return { name: DRIVER_NAMES[Math.floor(Math.random() * DRIVER_NAMES.length)], skill: s2, fee: s2 * 350 }; })());
+    persist(); updateCoins(); renderGarage(); toast(`👷 ${d.name} 開始幫你開 ${u.name}！`); Snd.buy(); return;
+  }
   const follow=e.target.closest('[data-follow-fleet]');if(follow){S.followFleetId=follow.dataset.followFleet;closeGarage();toast('📍 已切換至車隊追蹤鏡頭');return;}
   const dispatch=e.target.closest('[data-dispatch]');if(dispatch){const id=dispatch.dataset.dispatch,select=$(`[data-unit-cargo="${id}"]`);dispatchUnit(id,Number(select?.value));return;}
   const service=e.target.closest('[data-unit-service]');if(service){serviceFleetUnit(service.dataset.unitId,service.dataset.unitService);return;}
@@ -765,11 +802,18 @@ $('#gBody').addEventListener('click', e => {
     const c = save.company, kind = action.dataset.companyAction;
     const costs = { engine: [3200, 6800, 12500], fuel: [2600, 5600, 9800] };
     let cost = 0, message = '';
+    if (kind === 'warehouse') {
+      const next = WAREHOUSE[(c.warehouse || 0) + 1]; if (!next) return;
+      if (save.coins < next.cost) { toast(`金幣不足，還差 ${next.cost - save.coins} 金幣`); return; }
+      save.coins -= next.cost; c.expenses += next.cost; c.warehouse = (c.warehouse || 0) + 1; addHistory('倉庫', -next.cost);
+      persist(); updateCoins(); renderGarage(); toast(`🏬 升級成「${next.name}」！`); Snd.buy(); return;
+    }
     if (kind === 'truck') {
-      if (c.trucks >= 5) return;
-      cost = 15000 + Math.max(0, c.trucks - 1) * 8500;
+      if (c.trucks >= fleetCap()) return;
+      const model = TRUCK_MODELS[action.dataset.model] ? action.dataset.model : 'std';
+      cost = truckPrice(model);
       if (save.coins < cost) { toast(`金幣不足，還差 ${cost - save.coins} 金幣`); return; }
-      save.coins -= cost; c.trucks++; c.expenses += cost; c.fleetUnits.push(createFleetUnit(c.fleetUnits.length)); traffic.syncFleet(c.fleetUnits,c.name); message = `車隊擴編完成！現在有 ${c.trucks} 台營運卡車，已新增實體車隊單位`;
+      save.coins -= cost; c.trucks++; c.expenses += cost; addHistory('買車', -cost); c.fleetUnits.push(createFleetUnit(c.fleetUnits.length, TRUCK_MODELS[action.dataset.model] ? action.dataset.model : 'std')); traffic.syncFleet(c.fleetUnits,c.name); message = `車隊擴編完成！現在有 ${c.trucks} 台營運卡車，已新增實體車隊單位`;
     } else if (kind === 'engine' || kind === 'fuel') {
       const key = kind === 'engine' ? 'engineLevel' : 'fuelLevel';
       if (c[key] >= 3) return;
