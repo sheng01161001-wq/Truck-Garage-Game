@@ -141,6 +141,24 @@ body.touch #mission { max-width: 46vw; }
 .mirror-frame span { position: absolute; left: 6px; top: 4px; font-size: 11px; color: rgba(255,255,255,.85); text-shadow: 0 1px 3px #000; }
 body.cab-view .mirror-frame { display: block; }
 body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: none; }
+/* v28：接單板、送貨收據 */
+#jobPanel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 30; width: min(680px, 94vw); max-height: 88vh; overflow: auto; background: rgba(12,16,22,.96); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.6); color: #e8edf2; padding: 16px; }
+#jobPanel.hidden { display: none; }
+.jb-head { display: flex; justify-content: space-between; align-items: center; font-size: 20px; font-weight: 900; margin-bottom: 10px; }
+.jb-head button { background: #263241; color: #fff; border: 0; border-radius: 10px; padding: 8px 12px; font-size: 15px; cursor: pointer; }
+.receipt { background: linear-gradient(145deg,#1b2a37,#101820); border: 1px solid rgba(247,184,75,.35); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; }
+.receipt .stars { font-size: 30px; letter-spacing: 4px; text-align: center; margin: 2px 0 8px; }
+.receipt .row { display: flex; justify-content: space-between; padding: 4px 2px; font-size: 15px; border-bottom: 1px dashed rgba(255,255,255,.08); }
+.receipt .row b.neg { color: #ff8a80; } .receipt .row b.pos { color: #9be7b0; }
+.receipt .total { font-size: 19px; font-weight: 900; color: #f7c66b; border: 0; padding-top: 8px; }
+.jobs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.job { background: #17222e; border: 1px solid #334555; border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.job .cg { font-size: 22px; font-weight: 900; } .job small { color: #aebbc7; font-size: 13px; line-height: 1.5; }
+.job .tags span { display: inline-block; font-size: 12px; padding: 2px 7px; border-radius: 8px; margin: 0 4px 4px 0; background: #263746; color: #ffd28a; }
+.job .pay { font-size: 20px; color: #f7c66b; font-weight: 900; }
+.job button { margin-top: auto; padding: 11px; border: 0; border-radius: 10px; background: linear-gradient(135deg,#ffd77f,#e99a2b); color: #17191c; font-size: 16px; font-weight: 900; cursor: pointer; }
+@media (max-width: 640px) { .jobs { grid-template-columns: 1fr; } }
+.m-time { color: #9be7b0; font-weight: 800; } .m-time.late { color: #ff8a80; } .m-dmg { color: #ffb020; }
 #ver { position: fixed; left: 8px; bottom: 2px; font-size: 11px; color: rgba(255,255,255,.4); z-index: 5; pointer-events: none; }
 
 
