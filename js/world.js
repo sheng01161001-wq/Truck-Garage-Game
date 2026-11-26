@@ -6,11 +6,23 @@ import { rng, makeNoise, clamp, canvasTex, FONT } from './util.js';
 import {
   asphaltTex, noiseBumpTex, concreteTex, grassTex, facadeTex, corrugatedTex, boardTex, gravelTex, fieldTex, stripeTex, ledTex,
 } from './textures.js';
-import { naturalHeight, terrainHeight, buildHighway, LUMBER, nearHighway, inCity } from './highway.js';
+import { naturalHeight, terrainHeight, buildHighway, LUMBER, nearHighway, inCity, isInterchangeRoad, PIERS } from './highway.js';
 
-export const ROADS = [-240, -80, 80, 240];
+export const ROADS = [-400, -240, -80, 80, 240, 400];
 export const ROAD_W = 14;
-export const WORLD = 296;
+export const WORLD = 466;
+// 可探索區域標記：供世界入口標示與 GPS 小地圖共用。
+export const DISTRICTS = [
+  { name: '城市商業區', short: '市中心', x: 0, z: 0, rx: 92, rz: 92, color: '#d7a84b' },
+  { name: '港灣物流區', short: '港區', x: -226, z: 164, rx: 74, rz: 72, color: '#4a9bd4' },
+  { name: '工業園區', short: '工業區', x: 202, z: -54, rx: 78, rz: 92, color: '#9aa6b2' },
+  { name: '農業產區', short: '農業區', x: 164, z: -228, rx: 72, rz: 62, color: '#83b65b' },
+  { name: '山區林道', short: '山區', x: 590, z: -100, rx: 110, rz: 150, color: '#7eaa83' },
+  { name: '西郊轉運區', short: '西郊', x: -390, z: -110, rx: 78, rz: 100, color: '#c18a5a' },
+  { name: '北城倉儲區', short: '北倉', x: -20, z: -390, rx: 110, rz: 62, color: '#8c9aa8' },
+  { name: '東區冷鏈區', short: '冷鏈', x: 390, z: 100, rx: 62, rz: 100, color: '#65a9bd' },
+  { name: '南郊配送區', short: '南郊', x: 100, z: 390, rx: 100, rz: 62, color: '#b49a55' },
+];
 export const DEPOTS = [
   { name: '港口', emoji: '🚢', x: -266, z: 160, bx: -288, bz: 160, color: '#1f5fa8', kind: 'port' },
   { name: '農場', emoji: '🐄', x: 160, z: -264, bx: 160, bz: -287, color: '#4c7a2a', kind: 'farm' },
@@ -19,6 +31,10 @@ export const DEPOTS = [
   { name: '建材行', emoji: '🧱', x: -160, z: -102, bx: -160, bz: -126, color: '#b5651d', kind: 'site' },
   { name: '玩具店', emoji: '🧸', x: 102, z: 170, bx: 126, bz: 170, color: '#d81b60', kind: 'shop' },
   { name: '冰店', emoji: '🍦', x: -100, z: 264, bx: -100, bz: 287, color: '#0288d1', kind: 'shop' },
+  { name: '西郊轉運站', emoji: '📦', x: -425, z: -80, bx: -448, bz: -80, color: '#8d6e63', kind: 'shop' },
+  { name: '北城倉庫', emoji: '🏬', x: -80, z: -425, bx: -80, bz: -448, color: '#607d8b', kind: 'shop' },
+  { name: '東區冷鏈倉', emoji: '❄️', x: 425, z: 80, bx: 448, bz: 80, color: '#388eaa', kind: 'shop' },
+  { name: '南郊配送站', emoji: '🚚', x: 80, z: 425, bx: 80, bz: 448, color: '#9b7b35', kind: 'shop' },
   LUMBER, // 山上林場（走國道、過收費站和隧道）
 ];
 export const GAS = { x: -58, z: 30, name: '加油站' };
@@ -38,13 +54,13 @@ function terrainColor(x, z, h, out) {
   return out.multiplyScalar(0.85 + n * 0.3);
 }
 export function onRoad(x, z) {
-  if (Math.abs(x) > 300 || Math.abs(z) > 300) return false;
+  if (Math.abs(x) > 460 || Math.abs(z) > 460) return false;
   return ROADS.some((r) => Math.abs(x - r) < ROAD_W / 2 + 0.5 || Math.abs(z - r) < ROAD_W / 2 + 0.5);
 }
 const GRAVEL_ZONES = [];
 export function surfaceAt(x, z) {
   if (!inCity(x, z)) return 'road'; // 城外只能開在國道上
-  if (onRoad(x, z)) return 'road';
+  if (isInterchangeRoad(x, z) || onRoad(x, z)) return 'road';
   if (Math.hypot(x - GAS.x, z - GAS.z) < 14) return 'road';
   for (const d of DEPOTS) if (Math.abs(x - d.x) < 12 && Math.abs(z - d.z) < 12) return 'road';
   if (GRAVEL_ZONES.some((g) => Math.abs(x - g.x) < g.w / 2 && Math.abs(z - g.z) < g.d / 2)) return 'gravel';
@@ -118,7 +134,32 @@ export function buildWorld(scene, quality) {
   const gt = grassTex(); gt.repeat.set(70, 70);
   const groundMat = stdMat({ map: gt, roughness: 0.95 });
   wetMats.push({ mat: groundMat, dry: 0.95, wet: 0.6, dryColor: new THREE.Color(1, 1, 1), wetColor: new THREE.Color(0.75, 0.78, 0.75) });
-  const ground = mesh(new THREE.PlaneGeometry(740, 740), groundMat, 0, 0, 0, root, { cast: false }); ground.rotation.x = -Math.PI / 2;
+  const ground = mesh(new THREE.PlaneGeometry(1080, 1080), groundMat, 0, 0, 0, root, { cast: false }); ground.rotation.x = -Math.PI / 2;
+
+  // ---------- 區域入口指示牌 ----------
+  const signEntries = [
+    { text: 'CITY CENTER  城市商業區', x: 92, z: 108, ry: Math.PI / 2, color: '#8a5a18' },
+    { text: 'PORT LOGISTICS  港灣物流區', x: -252, z: 112, ry: -Math.PI / 2, color: '#145b86' },
+    { text: 'INDUSTRIAL PARK  工業園區', x: 252, z: -104, ry: Math.PI / 2, color: '#46515c' },
+    { text: 'FARM DISTRICT  農業產區', x: 124, z: -246, ry: 0, color: '#426d2d' },
+    { text: 'WEST FREIGHT  西郊轉運區', x: -452, z: -150, ry: -Math.PI / 2, color: '#76533b' },
+    { text: 'NORTH WAREHOUSE  北城倉儲區', x: -150, z: -452, ry: 0, color: '#536b7b' },
+    { text: 'EAST COLD CHAIN  東區冷鏈區', x: 452, z: 150, ry: Math.PI / 2, color: '#286f86' },
+    { text: 'SOUTH DISTRIBUTION  南郊配送區', x: 150, z: 452, ry: Math.PI, color: '#80652d' },
+  ];
+  const signPostMat = stdMat({ color: 0x777d82, roughness: 0.55, metalness: 0.65 });
+  for (const entry of signEntries) {
+    const tex = canvasTex(768, 192, (ctx, w, h) => {
+      ctx.fillStyle = entry.color; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = '#e9edf0'; ctx.lineWidth = 10; ctx.strokeRect(8, 8, w - 16, h - 16);
+      ctx.fillStyle = '#ffffff'; ctx.font = `bold 48px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(entry.text, w / 2, h / 2);
+    });
+    const boardMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide });
+    const sign = new THREE.Group(); sign.position.set(entry.x, 0, entry.z); sign.rotation.y = entry.ry; root.add(sign);
+    mesh(new THREE.BoxGeometry(0.45, 4.2, 0.45), signPostMat, -5.4, 2.1, 0, sign);
+    mesh(new THREE.BoxGeometry(0.45, 4.2, 0.45), signPostMat, 5.4, 2.1, 0, sign);
+    mesh(new THREE.BoxGeometry(12, 3, 0.35), boardMat, 0, 5.2, 0, sign);
+  }
 
   // ---------- 道路 ----------
   const bump = noiseBumpTex(3, 256, 0.8); bump.repeat.set(4, 8);
@@ -129,7 +170,7 @@ export function buildWorld(scene, quality) {
     wetMats.push({ mat: m, dry: 0.88, wet: 0.12, dryColor: new THREE.Color(1, 1, 1), wetColor: new THREE.Color(0.55, 0.56, 0.6) });
     roadMat[kind] = m;
   }
-  const lineKind = (r) => (Math.abs(r) === 240 ? 'highway' : 'city');
+  const lineKind = (r) => (Math.abs(r) >= 240 ? 'highway' : 'city');
   const addSeg = (axis, line, a, b) => {
     const len = b - a; if (len <= 0.1) return;
     const g = new THREE.PlaneGeometry(ROAD_W, len); g.rotateX(-Math.PI / 2);
@@ -138,7 +179,7 @@ export function buildWorld(scene, quality) {
     if (axis === 'z') mm.position.set(line, 0.02, (a + b) / 2);
     else { mm.rotation.y = Math.PI / 2; mm.position.set((a + b) / 2, 0.02, line); }
   };
-  const stops = [-300, ...ROADS, 300];
+  const stops = [-460, ...ROADS, 460];
   for (const line of ROADS) for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i] + (ROADS.includes(stops[i]) ? ROAD_W / 2 : 0), b = stops[i + 1] - (ROADS.includes(stops[i + 1]) ? ROAD_W / 2 : 0);
     addSeg('z', line, a, b); addSeg('x', line, a, b);
@@ -158,7 +199,7 @@ export function buildWorld(scene, quality) {
   // 積水（下雨才出現）
   const pudMat = new THREE.MeshPhysicalMaterial({ color: 0x1c1f24, roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.75, depthWrite: false, clearcoat: 1 });
   for (let i = 0; i < 70; i++) {
-    const line = ROADS[Math.floor(R() * 4)], along = (R() * 2 - 1) * 290, off = (R() * 2 - 1) * 5;
+    const line = ROADS[Math.floor(R() * ROADS.length)], along = (R() * 2 - 1) * 445, off = (R() * 2 - 1) * 5;
     const pg = new THREE.CircleGeometry(1 + R() * 2.2, 18); pg.rotateX(-Math.PI / 2); pg.scale(1, 1, 0.5 + R());
     const p = R() < 0.5 ? mesh(pg, pudMat, line + off, 0.045, along, root, { cast: false }) : mesh(pg, pudMat, along, 0.045, line + off, root, { cast: false });
     p.visible = false; puddles.push(p);
@@ -182,7 +223,7 @@ export function buildWorld(scene, quality) {
   const roofMat = stdMat({ color: 0x55575a, roughness: 0.9 });
   const keepAway = [...DEPOTS.flatMap((d) => [[d.x, d.z, 34], [d.bx, d.bz, 40]]), [SPAWN.x, SPAWN.z, 30], [GARAGE_BLD.x, GARAGE_BLD.z, 30], [GAS.x, GAS.z, 34]];
   const free = (x, z, sx, sz, margin = 4) => {
-    if (Math.abs(x) + sx / 2 > 292 || Math.abs(z) + sz / 2 > 292) return false;
+    if (Math.abs(x) + sx / 2 > 452 || Math.abs(z) + sz / 2 > 452) return false;
     if (ROADS.some((r) => Math.abs(x - r) < sx / 2 + ROAD_W / 2 + 5 || Math.abs(z - r) < sz / 2 + ROAD_W / 2 + 5)) return false;
     if (keepAway.some(([kx, kz, d]) => Math.hypot(x - kx, z - kz) < d + Math.max(sx, sz) / 2)) return false;
     return !boxes.some((b) => x + sx / 2 + margin > b.minx && x - sx / 2 - margin < b.maxx && z + sz / 2 + margin > b.minz && z - sz / 2 - margin < b.maxz);
@@ -349,9 +390,9 @@ export function buildWorld(scene, quality) {
 
   // ---------- 隨機大樓 ----------
   let placed = 0, tries = 0;
-  while (placed < 95 && tries < 5000) {
+  while (placed < 165 && tries < 9000) {
     tries++;
-    const x = (R() * 2 - 1) * 285, z = (R() * 2 - 1) * 285;
+    const x = (R() * 2 - 1) * 445, z = (R() * 2 - 1) * 445;
     const inner = Math.max(Math.abs(x), Math.abs(z)) < 170;
     const sx = 12 + R() * 16, sz = 12 + R() * 16;
     if (!free(x, z, sx, sz)) continue;
@@ -380,7 +421,7 @@ export function buildWorld(scene, quality) {
       const x = (R() * 2 - 1) * area, z = (R() * 2 - 1) * area, h = heightAt(x, z);
       if (h < minH || h > maxH) continue;
       if (nearHighway(x, z)) continue;
-      if (Math.max(Math.abs(x), Math.abs(z)) < 305) {
+      if (Math.max(Math.abs(x), Math.abs(z)) < 465) {
         if (ROADS.some((r) => Math.abs(x - r) < 12 || Math.abs(z - r) < 12)) continue;
         if (keepAway.some(([kx, kz, d]) => Math.hypot(x - kx, z - kz) < d * 0.7)) continue;
         if (boxes.some((b) => x > b.minx - 3 && x < b.maxx + 3 && z > b.minz - 3 && z < b.maxz + 3)) continue;
@@ -395,7 +436,7 @@ export function buildWorld(scene, quality) {
     crowns.count = trunks.count = n;
     root.add(crowns, trunks);
   };
-  placeTrees(quality === 'low' ? 250 : 450, 300, -1, 1, round, roundM);
+  placeTrees(quality === 'low' ? 450 : 850, 455, -1, 1, round, roundM);
   placeTrees(quality === 'low' ? 900 : 2200, 1200, 8, 160, pine, pineM);
 
   // ---------- 城外國道、收費站、隧道、林場 ----------
@@ -405,11 +446,12 @@ export function buildWorld(scene, quality) {
     wet: (mat, dry, wet, wetColor) => wetMats.push({ mat, dry, wet, dryColor: mat.color.clone(), wetColor }),
     night: (mat, on) => nightMats.push({ mat, on }),
   });
+  for (const p of PIERS) if (inCity(p.x, p.z)) boxes.push({ minx: p.x - p.sx / 2, maxx: p.x + p.sx / 2, minz: p.z - p.sz / 2, maxz: p.z + p.sz / 2 });
 
   // ---------- 路燈 ----------
   for (const line of ROADS) {
     const inner = Math.abs(line) === 80, step = inner ? 34 : 50;
-    for (let a = -290, i = 0; a <= 290; a += step, i++) {
+    for (let a = -450, i = 0; a <= 450; a += step, i++) {
       if (ROADS.some((r) => Math.abs(a - r) < 12)) continue;
       const side = inner ? (i % 2 ? 1 : -1) : 1;
       const off = ROAD_W / 2 + (inner ? 2.2 : 1.6);
@@ -465,6 +507,20 @@ export function buildWorld(scene, quality) {
     mesh(new THREE.BoxGeometry(34, 0.2, 48), floor, 0, -0.1, 0, g, { cast: false });
     const lineM = stdMat({ color: 0xf2c200, roughness: 0.6 });
     for (const x of [-6.5, 6.5]) mesh(new THREE.BoxGeometry(0.2, 0.02, 40), lineM, x, 0.01, 0, g, { cast: false });
+    // 中央車輛展示區：地坪環形燈帶與定位刻度，保持地面齊平不影響車輪高度
+    const stageDark = stdMat({ color: 0x202830, roughness: 0.42, metalness: 0.55 });
+    const stageRing = stdMat({ color: 0xe7a52e, emissive: 0x8a4d08, emissiveIntensity: 0.75, roughness: 0.28, metalness: 0.65 });
+    mesh(new THREE.CylinderGeometry(8.6, 8.6, 0.035, 96), stageDark, 0, 0.015, 5, g, { cast: false });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(8.25, 0.055, 8, 120), stageRing); ring.rotation.x = -Math.PI / 2; ring.position.set(0, 0.055, 5); ring.receiveShadow = false; g.add(ring);
+    const innerRing = new THREE.Mesh(new THREE.TorusGeometry(7.65, 0.018, 6, 120), lineM); innerRing.rotation.x = -Math.PI / 2; innerRing.position.set(0, 0.045, 5); g.add(innerRing);
+    for (let i = 0; i < 24; i++) {
+      const a = i / 24 * Math.PI * 2;
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.018, 0.055), stageRing);
+      tick.position.set(Math.cos(a) * 8.25, 0.06, 5 + Math.sin(a) * 8.25); tick.rotation.y = -a; g.add(tick);
+    }
+    const floorLabel = boardTex('CUSTOM TRUCK　/　SHOWROOM', '#101820', '#e9b653', 1024, 128);
+    const floorSign = new THREE.Mesh(new THREE.PlaneGeometry(8.5, 1.05), new THREE.MeshBasicMaterial({ map: floorLabel, transparent: true, depthWrite: false }));
+    floorSign.rotation.x = -Math.PI / 2; floorSign.position.set(0, 0.035, -16.5); g.add(floorSign);
     const wt = corrugatedTex('#c7ccd1', 3); wt.repeat.set(6, 2);
     const wall = stdMat({ map: wt, roughness: 0.6, metalness: 0.3 });
     mesh(new THREE.BoxGeometry(34, 12, 0.4), wall, 0, 6, -24, g); mesh(new THREE.BoxGeometry(34, 12, 0.4), wall, 0, 6, 24, g);
@@ -474,6 +530,9 @@ export function buildWorld(scene, quality) {
     for (const z of [-15, -5, 5, 15]) for (const x of [-7, 7]) mesh(new THREE.BoxGeometry(3, 0.1, 1.2), panel, x, 11.7, z, g, { cast: false });
     const bt = boardTex('卡車改裝王　改裝廠', '#1d3557', '#ffffff', 1024, 160);
     mesh(new THREE.BoxGeometry(16, 2.5, 0.1), stdMat({ map: bt, emissiveMap: bt, emissive: 0xffffff, emissiveIntensity: 0.4 }), 0, 8, -23.7, g);
+    const accent = stdMat({ color: 0x263746, emissive: 0x102b3d, emissiveIntensity: 0.55, metalness: 0.65, roughness: 0.35 });
+    for (const x of [-16.65, 16.65]) mesh(new THREE.BoxGeometry(0.08, 9.5, 0.12), accent, x, 6, 0, g, { cast: false });
+    for (const z of [-18, -12, 12, 18]) mesh(new THREE.BoxGeometry(0.08, 0.08, 3.8), stageRing, -16.72, 8.8, z, g, { cast: false });
     const red = stdMat({ color: 0xb71c1c, roughness: 0.35, metalness: 0.4 });
     for (let i = 0; i < 4; i++) mesh(new RoundedBoxGeometry(2, 1.8, 0.8, 2, 0.05), red, -12 + i * 2.2, 0.9, -23.2, g);
     const tireM = stdMat({ color: 0x151515, roughness: 0.9 });

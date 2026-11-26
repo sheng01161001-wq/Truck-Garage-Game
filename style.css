@@ -137,3 +137,84 @@ body.touch #mission { max-width: 46vw; }
 @keyframes pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.5); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
   30% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -90%); } }
 #ver { position: fixed; left: 8px; bottom: 2px; font-size: 11px; color: rgba(255,255,255,.4); z-index: 5; pointer-events: none; }
+
+
+/* 3D 展示間控制台 */
+#showroomHud { position: fixed; left: 22px; bottom: 22px; z-index: 19; max-width: min(720px, calc(100vw - 460px)); pointer-events: none; }
+.showroom-brand { display: flex; align-items: center; gap: 10px; width: fit-content; margin-bottom: 12px; padding: 10px 14px; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(7,12,18,.78); backdrop-filter: blur(12px); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
+.showroom-brand b { display: block; color: #f7b84b; letter-spacing: 2px; font-size: 12px; }
+.showroom-brand small { display: block; color: #d3dce5; font-size: 13px; margin-top: 2px; }
+.live-dot { width: 9px; height: 9px; border-radius: 50%; background: #64e69a; box-shadow: 0 0 12px #64e69a; }
+.showroom-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; pointer-events: auto; padding: 9px; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; background: rgba(7,12,18,.86); backdrop-filter: blur(12px); box-shadow: 0 10px 34px rgba(0,0,0,.35); }
+.showroom-controls button { min-width: 48px; padding: 9px 12px; color: #e8edf2; background: #1a2530; border: 1px solid #3a4652; border-radius: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.showroom-controls button:hover, .showroom-controls button.active { color: #15191e; background: linear-gradient(135deg,#ffd47a,#e99a2b); border-color: #ffd47a; }
+.showroom-controls i { width: 1px; height: 26px; background: rgba(255,255,255,.2); margin: 0 3px; }
+.showroom-tip { margin: 8px 0 0 4px; color: rgba(235,242,248,.78); font-size: 12px; text-shadow: 0 2px 5px #000; }
+@media (max-width: 760px) {
+  #showroomHud { left: 10px; right: 10px; bottom: calc(58vh + 10px); max-width: none; }
+  .showroom-brand { margin-bottom: 6px; padding: 7px 10px; }
+  .showroom-controls { gap: 4px; padding: 6px; }
+  .showroom-controls button { min-width: 38px; padding: 8px 9px; font-size: 12px; }
+  .showroom-tip { font-size: 10px; margin-top: 5px; }
+}
+
+/* v6 零件即時展示與快速檢視 */
+.showroom-focus { display:flex; align-items:center; flex-wrap:wrap; gap:6px; width:fit-content; max-width:min(720px,calc(100vw - 24px)); margin-top:8px; padding:8px 10px; border:1px solid rgba(255,255,255,.14); border-radius:12px; background:rgba(7,12,18,.82); backdrop-filter:blur(12px); box-shadow:0 8px 24px rgba(0,0,0,.28); pointer-events:auto; }
+.showroom-focus span { color:#e9b653; font-size:12px; font-weight:800; letter-spacing:1px; margin:0 4px; }
+.showroom-focus button { padding:7px 11px; color:#e8edf2; background:#1a2530; border:1px solid #3a4652; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; }
+.showroom-focus button:hover,.showroom-focus button.active { color:#15191e; background:linear-gradient(135deg,#ffd47a,#e99a2b); border-color:#ffd47a; }
+@media(max-width:760px) { .showroom-focus { gap:4px; padding:6px; } .showroom-focus span { width:100%; margin:0 2px 2px; } .showroom-focus button { padding:7px 9px; font-size:11px; } }
+
+/* D：客製烤漆工作室 */
+.studio-intro { padding: 13px 14px; margin: 6px 0 14px; border: 1px solid rgba(247,184,75,.35); border-radius: 12px; background: linear-gradient(135deg,rgba(247,184,75,.13),rgba(18,28,38,.9)); }
+.studio-intro b { display:block; color:#f7b84b; font-size:13px; letter-spacing:1.5px; }
+.studio-intro small { display:block; color:#aebbc7; margin-top:5px; line-height:1.5; }
+.studio-color-row { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin:7px 0 10px; }
+.studio-color-row.single { grid-template-columns:1fr; }
+.studio-color-row label,.studio-select { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 11px; border:1px solid #2c3845; border-radius:10px; background:#17202a; color:#dce4ec; font-size:13px; }
+.studio-color-row input[type=color] { width:48px; height:34px; padding:2px; border:1px solid #566372; border-radius:7px; background:#0b0f14; cursor:pointer; }
+.studio-select { margin:8px 0 12px; }
+.studio-select select { min-width:130px; max-width:58%; padding:8px; color:#fff; border:1px solid #465362; border-radius:8px; background:#0d141c; }
+.studio-note { margin:14px 0 4px; padding:10px 12px; border-left:3px solid #f7b84b; border-radius:6px; background:rgba(247,184,75,.08); color:#c5d0da; font-size:12px; line-height:1.6; }
+
+/* E：自訂彩繪設計器 */
+.art-editor{margin:10px 0 16px;padding:12px;border:1px solid #354454;border-radius:12px;background:linear-gradient(145deg,#17222e,#0e151d);}
+.art-editor>b{display:block;color:#f7c66b;font-size:14px;margin-bottom:4px}.art-editor>small{display:block;color:#aebbc7;font-size:11px;line-height:1.5;margin-bottom:10px}
+.art-upload{display:flex;align-items:center;justify-content:center;min-height:42px;border:1px dashed #b58b45;border-radius:9px;background:rgba(247,184,75,.08);color:#f4cf8b;font-size:13px;font-weight:800;cursor:pointer;margin:8px 0}.art-upload input{max-width:58%;font-size:11px;color:#cbd5df}
+.art-preview{display:block;width:100%;height:auto;aspect-ratio:680/210;border:1px solid #455566;border-radius:9px;touch-action:none;cursor:grab;margin:8px 0}.art-preview:active{cursor:grabbing}
+.art-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.art-controls label{display:grid;gap:5px;color:#cbd5df;font-size:11px;background:#111a23;padding:8px;border-radius:8px}.art-controls input{width:100%;accent-color:#f2b84e}
+.art-remove{margin-top:9px;padding:8px 12px;border:1px solid #784747;border-radius:8px;background:#321f22;color:#ffc4c4;font-weight:700;cursor:pointer}
+@media(max-width:560px){.art-controls{grid-template-columns:1fr}.art-upload{flex-wrap:wrap;padding:8px}}
+
+
+/* F：專屬卡車收藏車庫 */
+.fleet-intro{padding:14px;margin:6px 0 14px;border:1px solid rgba(247,184,75,.35);border-radius:13px;background:linear-gradient(140deg,rgba(247,184,75,.14),rgba(18,28,38,.92))}.fleet-intro>b{display:block;color:#f7c66b;font-size:14px;letter-spacing:1.2px}.fleet-intro>small{display:block;color:#bdc9d4;font-size:12px;line-height:1.6;margin:6px 0 12px}.fleet-save-current{width:100%;padding:11px;border:1px solid #f4bd58;border-radius:10px;background:linear-gradient(135deg,#ffd77f,#e99a2b);color:#17191c;font-size:15px;font-weight:900;cursor:pointer}.fleet-count{margin-top:8px;text-align:right;color:#aebbc7;font-size:11px}.fleet-grid{display:grid;grid-template-columns:1fr;gap:11px}.fleet-card{overflow:hidden;border:1px solid #354454;border-radius:13px;background:linear-gradient(145deg,#192532,#101820);box-shadow:0 8px 22px rgba(0,0,0,.2)}.fleet-photo{height:142px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;background:radial-gradient(ellipse at center,#344452,#111820 72%);color:#e9b653;font-size:36px}.fleet-photo img{width:100%;height:100%;object-fit:cover}.fleet-photo small{font-size:11px;color:#8f9eac}.fleet-card-info{padding:10px}.fleet-name{width:100%;padding:8px 10px;border:1px solid #435364;border-radius:8px;background:#0d141b;color:#fff;font-size:16px;font-weight:800}.fleet-card-info>small{display:block;margin:7px 0 9px;color:#aebbc7;font-size:11px}.fleet-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.fleet-actions button{padding:8px 5px;border:1px solid #425364;border-radius:8px;background:#243341;color:#eaf0f5;font-size:12px;font-weight:800;cursor:pointer}.fleet-actions button:first-child{background:#f2b84e;border-color:#f2b84e;color:#17191c}.fleet-actions button.danger{grid-column:1/-1;background:#321f22;border-color:#784747;color:#ffc4c4}.fleet-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;min-height:180px;border:1px dashed #465564;border-radius:13px;color:#e9b653;font-size:38px}.fleet-empty b{font-size:15px;color:#e8edf2}.fleet-empty small{font-size:12px;color:#9eacb9;text-align:center;padding:0 15px}
+
+
+/* G：物流公司與經營系統 */
+.company-hero{padding:15px;margin:6px 0 14px;border:1px solid rgba(247,184,75,.38);border-radius:14px;background:radial-gradient(ellipse at 90% 0%,rgba(247,184,75,.18),transparent 55%),linear-gradient(145deg,#1b2a37,#101820)}
+.company-kicker{font-size:11px;font-weight:900;letter-spacing:1.5px;color:#f6c56e;margin-bottom:12px}
+.company-hero>label{display:grid;gap:6px;color:#dce5ed;font-size:12px;font-weight:800}
+.company-hero input{width:100%;padding:10px 12px;border:1px solid #465665;border-radius:9px;background:#0b1219;color:#fff;font-size:17px;font-weight:800}
+.company-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.company-stats>div{padding:10px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(0,0,0,.2)}
+.company-stats small{display:block;color:#9eacb9;font-size:11px}.company-stats b{display:block;margin-top:4px;color:#f3d18e;font-size:17px}.company-stats .positive{color:#80e0a5}.company-stats .negative{color:#ff9b9b}
+.company-section,.company-ledger{padding:13px;margin:10px 0;border:1px solid #334353;border-radius:12px;background:linear-gradient(145deg,#17232e,#101820)}
+.company-section>b,.company-ledger>b{display:block;color:#f3c46e;font-size:14px;margin-bottom:5px}.company-section>small{display:block;color:#aebbc7;font-size:11px;line-height:1.55;margin-bottom:10px}
+.company-upgrade,.level-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border-radius:9px;background:#0d151d;color:#e5edf4;font-size:13px}
+.company-upgrade small{color:#98a7b5;font-size:11px}.company-upgrade button,.level-row button{max-width:56%;padding:9px 11px;border:1px solid #f3bd5b;border-radius:8px;background:linear-gradient(135deg,#ffd77f,#e99a2b);color:#17191c;font-size:12px;font-weight:900;cursor:pointer}.company-upgrade button:disabled,.level-row button:disabled{opacity:.5;cursor:not-allowed}
+.level-row{margin-top:7px}.level-row>span{font-size:13px}.level-row b{color:#f4c66e;margin-left:5px}.level-row button{font-size:11px}
+.contract-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.contract-card{padding:10px;border:1px solid #354656;border-radius:10px;background:#0e1720}.contract-card>div{display:flex;justify-content:space-between;gap:5px;align-items:center}.contract-card>div b{font-size:13px;color:#f1f5f8}.contract-card>div span{font-size:10px;color:#f4c66e;white-space:nowrap}.contract-card>small{display:block;color:#9eafbd;margin-top:7px;font-size:11px}.contract-card p{min-height:32px;color:#aebbc7;font-size:10px;line-height:1.5;margin:6px 0}.contract-card button{width:100%;padding:8px 5px;border:1px solid #53687a;border-radius:7px;background:#263a4b;color:#f3f7fa;font-size:11px;font-weight:800;cursor:pointer}.contract-card button:hover{background:#f0b84f;color:#111}
+.company-ledger>div{display:flex;justify-content:space-between;gap:10px;padding:8px 2px;border-bottom:1px solid rgba(255,255,255,.07);color:#aebbc7;font-size:12px}.company-ledger>div:last-child{border:0}.company-ledger strong{color:#f3d18e;font-variant-numeric:tabular-nums}.m-contract{display:inline-block;padding:2px 5px;border-radius:5px;background:rgba(247,184,75,.15);color:#f7c66b!important;font-size:10px!important}
+@media(max-width:560px){.contract-grid{grid-template-columns:1fr}.company-stats b{font-size:15px}.company-upgrade,.level-row{align-items:flex-start;flex-direction:column}.company-upgrade button,.level-row button{max-width:none;width:100%}}
+
+/* H：真實物流車隊調度與道路車輛 */
+.dispatch-list{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px}.dispatch-card{padding:12px;border:1px solid #405364;border-radius:11px;background:linear-gradient(145deg,#101b25,#0c131a);box-shadow:0 6px 18px rgba(0,0,0,.18)}.dispatch-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.dispatch-top>b{color:#f2d08e;font-size:14px}.dispatch-top>span{font-size:11px;color:#9edbb3;font-weight:800}.dispatch-meta{margin:7px 0;color:#aab8c5;font-size:11px}.dispatch-route{padding:9px;border-radius:8px;background:rgba(247,184,75,.09);color:#f4d49a;font-size:12px;font-weight:800}.dispatch-route small{display:block;margin-top:4px;color:#b9c6d1;font-size:10px;font-weight:500}.dispatch-progress{height:7px;margin:8px 0 10px;overflow:hidden;border-radius:10px;background:#293744}.dispatch-progress i{display:block;height:100%;border-radius:10px;background:linear-gradient(90deg,#e59a2b,#ffe09a);transition:width .35s}.dispatch-pick{display:grid;gap:6px;color:#b9c6d1;font-size:11px}.dispatch-pick select{width:100%;padding:9px;border:1px solid #435565;border-radius:8px;background:#101a23;color:#f2f5f8}.dispatch-go{width:100%;margin-top:8px;padding:10px;border:1px solid #f1bd5a;border-radius:8px;background:linear-gradient(135deg,#ffdc8d,#e99b2b);color:#17191c;font-weight:900;cursor:pointer}.dispatch-service{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.dispatch-service button{padding:8px 5px;border:1px solid #465767;border-radius:8px;background:#263745;color:#e7edf2;font-size:11px;font-weight:800;cursor:pointer}.dispatch-earned{margin-top:8px;text-align:right;color:#aebbc7;font-size:10px}
+
+/* v12 車隊事件與追蹤 */
+.dispatch-event { margin: 6px 0; padding: 7px 9px; border-radius: 8px; background: rgba(255,159,28,.09); color: #ffd28a; font-size: 12px; line-height: 1.45; }
+.dispatch-follow { margin-left: 8px; border: 1px solid #536779; border-radius: 7px; padding: 4px 7px; color: #fff; background: #233443; cursor: pointer; font-size: 12px; }
+.dispatch-follow:hover { background: #ff9f1c; color: #111; }
+
+/* J：車隊品牌識別、個別塗裝與營運成本 */
+.fleet-custom-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.fleet-custom-row label{display:grid;gap:5px;color:#aebbc7;font-size:11px}.fleet-custom-row select,.fleet-custom-row input{width:100%;min-width:0;padding:8px 9px;border:1px solid #435565;border-radius:8px;background:#101a23;color:#f2f5f8;font-size:12px}.fleet-custom-row select{cursor:pointer}.dispatch-top>span{max-width:52%;text-align:right}@media(max-width:560px){.fleet-custom-row{grid-template-columns:1fr}}

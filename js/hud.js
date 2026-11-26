@@ -1,14 +1,14 @@
 // 儀表板（轉速表、速度表、檔位、油量、水溫、損傷）、GPS 小地圖與導航路線
-import { ROADS, ROAD_W, DEPOTS, GAS, GARAGE_BLD } from './world.js';
+import { ROADS, ROAD_W, DEPOTS, GAS, GARAGE_BLD, DISTRICTS } from './world.js';
 import { clamp, roundRectPath } from './util.js';
-import { PTS as HW_PTS, hwProject, inCity, LEN as HW_LEN } from './highway.js';
+import { PTS as HW_PTS, hwProject, inCity, LEN as HW_LEN, CITY_SIZE } from './highway.js';
 
 // ---------- 導航：沿著道路找最短路 ----------
 function nearestRoadPoint(x, z) {
   let best = null;
   for (const r of ROADS) {
-    const a = { x: r, z: clamp(z, -300, 300), axis: 'z', line: r, s: clamp(z, -300, 300) };
-    const b = { x: clamp(x, -300, 300), z: r, axis: 'x', line: r, s: clamp(x, -300, 300) };
+    const a = { x: r, z: clamp(z, -CITY_SIZE, CITY_SIZE), axis: 'z', line: r, s: clamp(z, -CITY_SIZE, CITY_SIZE) };
+    const b = { x: clamp(x, -CITY_SIZE, CITY_SIZE), z: r, axis: 'x', line: r, s: clamp(x, -CITY_SIZE, CITY_SIZE) };
     for (const p of [a, b]) { const d = Math.hypot(p.x - x, p.z - z); if (!best || d < best.d) best = { ...p, d }; }
   }
   return best;
@@ -74,7 +74,7 @@ export function computeRoute(from, to) {
 // ---------- 小地圖 ----------
 export function drawMinimap(cv, st) {
   const ctx = cv.getContext('2d'), W = cv.width, cx = W / 2, cy = W / 2;
-  const s = W / 380, th = st.heading;
+  const s = W / 920, th = st.heading;
   const a = -s * Math.cos(th), c = s * Math.sin(th), b = -s * Math.sin(th), d = -s * Math.cos(th);
   const e = cx - (a * st.x + c * st.z), f = cy - (b * st.x + d * st.z);
   const toScreen = (x, z) => [a * x + c * z + e, b * x + d * z + f];
@@ -82,8 +82,26 @@ export function drawMinimap(cv, st) {
   ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, W / 2 - 2, 0, Math.PI * 2); ctx.clip();
   ctx.fillStyle = st.night ? '#101820' : '#2a3a2c'; ctx.fillRect(0, 0, W, W);
   ctx.setTransform(a, b, c, d, e, f);
+  // 半透明區域輪廓與名稱，讓玩家在 GPS 上辨識不同物流地帶。
+  for (const zone of DISTRICTS) {
+    ctx.save(); ctx.fillStyle = zone.color + '22'; ctx.strokeStyle = zone.color + 'bb'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.ellipse(zone.x, zone.z, zone.rx, zone.rz, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = st.night ? '#f2f5f7' : '#ffffff'; ctx.strokeStyle = 'rgba(0,0,0,.72)'; ctx.lineWidth = 3;
+    ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.strokeText(zone.short, zone.x, zone.z); ctx.fillText(zone.short, zone.x, zone.z); ctx.restore();
+  }
   ctx.strokeStyle = st.night ? '#4a5866' : '#8e979f'; ctx.lineWidth = ROAD_W; ctx.lineCap = 'butt';
-  for (const r of ROADS) { ctx.beginPath(); ctx.moveTo(r, -300); ctx.lineTo(r, 300); ctx.moveTo(-300, r); ctx.lineTo(300, r); ctx.stroke(); }
+  for (const r of ROADS) { ctx.beginPath(); ctx.moveTo(r, -CITY_SIZE); ctx.lineTo(r, CITY_SIZE); ctx.moveTo(-CITY_SIZE, r); ctx.lineTo(CITY_SIZE, r); ctx.stroke(); }
+  // Q：四象限環狀交流道主線與四條匝道，同步呈現在 GPS。
+  ctx.save(); ctx.strokeStyle = st.night ? '#b8c8d8' : '#dce4eb'; ctx.lineWidth = ROAD_W * 0.72;
+  ctx.beginPath(); ctx.moveTo(240,100); ctx.lineTo(240,380); ctx.stroke();
+  ctx.setLineDash([7,5]); ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.moveTo(330,234); ctx.bezierCurveTo(330,180,285,145,240,145);
+  ctx.moveTo(330,246); ctx.bezierCurveTo(330,300,285,335,240,335);
+  ctx.moveTo(150,234); ctx.bezierCurveTo(150,180,195,175,240,175);
+  ctx.moveTo(150,246); ctx.bezierCurveTo(150,300,195,305,240,305);
+  ctx.stroke(); ctx.setLineDash([]); ctx.restore();
   ctx.lineJoin = 'round'; ctx.beginPath(); HW_PTS.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z))); ctx.stroke();
   for (const p of HW_PTS) if (p.w > 7.5) { ctx.lineWidth = p.w * 2; ctx.beginPath(); ctx.moveTo(p.x - p.fx * 2.2, p.z - p.fz * 2.2); ctx.lineTo(p.x + p.fx * 2.2, p.z + p.fz * 2.2); ctx.stroke(); }
   ctx.strokeStyle = st.night ? '#2a3038' : '#5d646b'; ctx.lineWidth = ROAD_W * 0.9;
@@ -94,6 +112,7 @@ export function drawMinimap(cv, st) {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (st.cars) { ctx.fillStyle = '#d0d6dc'; for (const p of st.cars) { const [x, y] = toScreen(p.x, p.z); ctx.fillRect(x - 1.5, y - 1.5, 3, 3); } }
+  if (st.selectedFleet) { const [x,y]=toScreen(st.selectedFleet.x,st.selectedFleet.z);ctx.fillStyle='#ff9f1c';ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke(); } 
   const dot = (x, z, col, r, label) => {
     const [sx, sy] = toScreen(x, z); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -166,4 +185,6 @@ export function drawCluster(cv, d) {
   bar(ctx, W - 180, H - 18, 150, '車損', d.damage, '#ffb020', d.damage > 0.7);
   ctx.fillStyle = '#7f8c99'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
   ctx.fillText(`載重 ${d.tons} 噸`, mx, 168);
+  ctx.fillStyle = d.kmh > d.speedLimit + 1 ? '#ff5a5a' : '#a9c4d8'; ctx.font = 'bold 12px sans-serif';
+  ctx.fillText(`速限 ${d.speedLimit} km/h${d.brakeTemp > 0.5 ? '　煞車溫度偏高' : ''}${d.rollover ? '　側翻救援：按 R' : ''}`, mx, 190);
 }

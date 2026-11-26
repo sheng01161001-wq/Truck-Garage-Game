@@ -148,21 +148,91 @@ function drawName(ctx, w, h, text, base) {
   ctx.fillStyle = light ? '#1b1b1b' : '#ffffff'; ctx.fillText(text, w / 2, h / 2);
 }
 
+// 特殊烤漆材質：用物理材質參數呈現透明清漆、金屬粉與角度變色
+let FLAKE_ROUGHNESS = null;
+function makeFlakeRoughnessMap() {
+  if (FLAKE_ROUGHNESS) return FLAKE_ROUGHNESS;
+  const canvas = makeCanvas(512, 512), ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#d8d8d8'; ctx.fillRect(0, 0, 512, 512);
+  const r = rng(7341);
+  for (let i = 0; i < 5200; i++) {
+    const x = r() * 512, y = r() * 512, s = 0.35 + r() * 1.25;
+    const v = Math.floor(65 + r() * 115);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = 8;
+  FLAKE_ROUGHNESS = tex;
+  return FLAKE_ROUGHNESS;
+}
+
 function makePaintMat(paint, tex) {
   const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: tex });
+  // 預設原廠烤漆也保留清漆層，讓車身高光更接近汽車烤漆
+  m.metalness = 0.05; m.roughness = 0.32; m.clearcoat = 1; m.clearcoatRoughness = 0.09;
   switch (paint) {
-    case 'matte': m.metalness = 0; m.roughness = 0.85; break;
-    case 'metal': m.metalness = 0.65; m.roughness = 0.3; m.clearcoat = 1; m.clearcoatRoughness = 0.05; break;
-    case 'pearl': m.metalness = 0.4; m.roughness = 0.25; m.clearcoat = 1; m.iridescence = 1; m.iridescenceIOR = 1.5; m.iridescenceThicknessRange = [250, 900]; break;
-    case 'neon': m.metalness = 0; m.roughness = 0.35; m.clearcoat = 0.5; m.emissive = new THREE.Color(0xffffff); m.emissiveMap = tex; m.emissiveIntensity = 0.7; break;
-    case 'chrome': m.metalness = 1; m.roughness = 0.04; break;
-    case 'chameleon': m.metalness = 0.55; m.roughness = 0.2; m.clearcoat = 1; m.iridescence = 0.6; break;
-    default: m.metalness = 0.05; m.roughness = 0.35; m.clearcoat = 1; m.clearcoatRoughness = 0.08;
+    case 'matte':
+      m.metalness = 0.02; m.roughness = 0.88; m.clearcoat = 0.08; break;
+    case 'metal':
+      m.metalness = 0.72; m.roughness = 0.27; m.clearcoat = 1; m.clearcoatRoughness = 0.045;
+      m.roughnessMap = makeFlakeRoughnessMap(); break;
+    case 'pearl':
+      m.metalness = 0.48; m.roughness = 0.22; m.clearcoat = 1; m.clearcoatRoughness = 0.035;
+      m.iridescence = 1; m.iridescenceIOR = 1.45; m.iridescenceThicknessRange = [280, 980];
+      m.roughnessMap = makeFlakeRoughnessMap(); break;
+    case 'neon':
+      m.metalness = 0.05; m.roughness = 0.3; m.clearcoat = 0.55;
+      m.emissive = new THREE.Color(0xffffff); m.emissiveMap = tex; m.emissiveIntensity = 0.45; break;
+    case 'chrome':
+      m.color.set(0xdfe5eb); m.metalness = 1; m.roughness = 0.035; m.clearcoat = 0.35; break;
+    case 'chameleon':
+      m.metalness = 0.68; m.roughness = 0.16; m.clearcoat = 1; m.clearcoatRoughness = 0.025;
+      m.iridescence = 1; m.iridescenceIOR = 1.55; m.iridescenceThicknessRange = [180, 1100];
+      m.roughnessMap = makeFlakeRoughnessMap(); break;
+    case 'candy':
+      m.metalness = 0.62; m.roughness = 0.14; m.clearcoat = 1; m.clearcoatRoughness = 0.018;
+      m.roughnessMap = makeFlakeRoughnessMap(); break;
+    case 'satin':
+      m.metalness = 0.58; m.roughness = 0.43; m.clearcoat = 0.42; m.clearcoatRoughness = 0.22; break;
+    case 'holographic':
+      m.metalness = 0.78; m.roughness = 0.13; m.clearcoat = 1; m.clearcoatRoughness = 0.02;
+      m.iridescence = 1; m.iridescenceIOR = 1.6; m.iridescenceThicknessRange = [100, 1200];
+      m.roughnessMap = makeFlakeRoughnessMap(); break;
+    case 'brushed':
+      m.metalness = 0.9; m.roughness = 0.34; m.clearcoat = 0.55; m.clearcoatRoughness = 0.16;
+      m.anisotropy = 0.7; break;
   }
   return m;
 }
 
 const GLOW_COLORS = { blue: 0x00b4ff, pink: 0xff4fd8, green: 0x2bff88, rainbow: 0xff0000 };
+
+function fillPaint(ctx, w, h, colorA, colorB, mode = 'off') {
+  if (mode === 'horizontal' || mode === 'vertical') {
+    const g = mode === 'horizontal' ? ctx.createLinearGradient(0, 0, w, 0) : ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, colorA || '#b71c1c'); g.addColorStop(1, colorB || colorA || '#b71c1c');
+    ctx.fillStyle = g;
+  } else ctx.fillStyle = colorA || '#b71c1c';
+  ctx.fillRect(0, 0, w, h);
+}
+
+// 玩家自訂彩繪貼圖快取（支援透明 PNG）
+const artworkImages = new Map();
+function drawArtwork(ctx, w, h, cfg, prefix, redraw) {
+  const data=cfg[`${prefix}DecalData`]; if(!data)return;
+  let img=artworkImages.get(data);
+  if(!img){img=new Image();artworkImages.set(data,img);img.onload=()=>{if(typeof redraw==='function')redraw();};img.src=data;}
+  if(!img.complete||!img.naturalWidth)return;
+  const x=w*(.5+(cfg[`${prefix}DecalX`]||0)), y=h*(.5+(cfg[`${prefix}DecalY`]||0));
+  const scale=cfg[`${prefix}DecalScale`]||.4, maxW=w*scale, maxH=h*scale;
+  const ratio=Math.min(maxW/img.naturalWidth,maxH/img.naturalHeight);
+  ctx.save();ctx.translate(x,y);ctx.rotate((cfg[`${prefix}DecalRotation`]||0)*Math.PI/180);
+  ctx.drawImage(img,-img.naturalWidth*ratio/2,-img.naturalHeight*ratio/2,img.naturalWidth*ratio,img.naturalHeight*ratio);ctx.restore();
+}
 
 // ======================================================================
 export function buildRig(cfg, dirt = 0) {
@@ -179,15 +249,15 @@ export function buildRig(cfg, dirt = 0) {
   const surface = (w, h, painter) => {
     const canvas = makeCanvas(w, h), ctx = canvas.getContext('2d');
     const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-    const s = { tex, redraw(d) { ctx.clearRect(0, 0, w, h); painter(ctx, w, h); drawGrime(ctx, w, h, d, w + h); tex.needsUpdate = true; } };
+    const s = { tex, redraw(d) { ctx.clearRect(0, 0, w, h); painter(ctx, w, h, () => s.redraw(d)); drawGrime(ctx, w, h, d, w + h); tex.needsUpdate = true; } };
     s.redraw(dirt); own.push(tex); surfaces.push(s); return s;
   };
 
   const US = cfg.cabStyle === 'us';
   const cham = cfg.paint === 'chameleon';
   const base = cham ? '#ffffff' : cfg.cabColor;
-  const cabS = surface(512, 512, (ctx, w, h) => { ctx.fillStyle = base; ctx.fillRect(0, 0, w, h); drawPattern(ctx, w, h, cfg.pattern, cfg.patternColor); });
-  const plainS = surface(64, 64, (ctx, w, h) => { ctx.fillStyle = base; ctx.fillRect(0, 0, w, h); });
+  const cabS = surface(512, 512, (ctx, w, h, redraw) => { fillPaint(ctx, w, h, base, cfg.cabColor2, cfg.cabGradient); drawPattern(ctx, w, h, cfg.pattern, cfg.patternColor); drawArtwork(ctx,w,h,cfg,'cab',redraw); });
+  const plainS = surface(64, 64, (ctx, w, h) => { fillPaint(ctx, w, h, base, cfg.cabColor2, cfg.cabGradient); });
   const paint = makePaintMat(cfg.paint, cabS.tex), paintPlain = makePaintMat(cfg.paint, plainS.tex);
   own.push(paint, paintPlain);
 
@@ -465,14 +535,14 @@ export function buildRig(cfg, dirt = 0) {
 
   const tBase = cfg.trailerColor;
   const tPaint = (ctx, w, h, withName) => {
-    ctx.fillStyle = tBase; ctx.fillRect(0, 0, w, h);
+    fillPaint(ctx, w, h, tBase, cfg.trailerColor2, cfg.trailerGradient);
     drawPattern(ctx, w, h, cfg.trailerPattern, cfg.trailerPatColor);
     if (withName) drawName(ctx, w, h, cfg.name, tBase);
   };
   const tMat = (s, extra = {}) => { const mm = new THREE.MeshStandardMaterial({ map: s.tex, roughness: 0.45, metalness: 0.15, ...extra }); own.push(mm); return mm; };
   let load = null;
   if (tType === 'box') {
-    const sideS = surface(1024, 226, (c, w, h) => { tPaint(c, w, h, true); c.fillStyle = 'rgba(0,0,0,.08)'; for (let x = 0; x < w; x += 48) c.fillRect(x, 0, 2, h); });
+    const sideS = surface(1024, 226, (c, w, h, redraw) => { tPaint(c, w, h, true); drawArtwork(c,w,h,cfg,'trailer',redraw); c.fillStyle = 'rgba(0,0,0,.08)'; for (let x = 0; x < w; x += 48) c.fillRect(x, 0, 2, h); });
     const endS = surface(256, 256, (c, w, h) => tPaint(c, w, h, false));
     const doorS = surface(256, 300, (c, w, h) => {
       c.fillStyle = tBase; c.fillRect(0, 0, w, h);
@@ -487,7 +557,7 @@ export function buildRig(cfg, dirt = 0) {
     }
     for (const x of [-0.75, -0.35, 0.35, 0.75]) part(T, cyl(0.025, 0.025, 2.8, 8), m.chrome, x, 2.95, -12.73);
   } else if (tType === 'dump') {
-    const sideS = surface(1024, 168, (c, w, h) => tPaint(c, w, h, true));
+    const sideS = surface(1024, 168, (c, w, h, redraw) => { tPaint(c, w, h, true); drawArtwork(c,w,h,cfg,'trailer',redraw); });
     const plainT = surface(64, 64, (c, w, h) => { c.fillStyle = tBase; c.fillRect(0, 0, w, h); });
     const sideM = tMat(sideS, { metalness: 0.3 }), pM = tMat(plainT, { metalness: 0.3 });
     part(T, box(2.45, 0.12, 11.0), m.steel, 0, 1.7, -6.7);

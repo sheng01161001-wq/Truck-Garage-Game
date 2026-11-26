@@ -5,7 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b0f14">
 <title>卡車改裝王</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚛</text></svg>">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="卡車改裝王">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": {
@@ -91,6 +97,33 @@
   <div id="gBody" class="g-body"></div>
   <div id="gBuy" class="g-buy"></div>
   <button id="gExit" class="btn-big g-exit">🚛 開出去送貨</button>
+</div>
+
+<!-- 3D 改裝展示控制台 -->
+<div id="showroomHud" class="hidden" aria-label="3D 展示控制台">
+  <div class="showroom-brand"><span class="live-dot"></span><div><b>SHOWROOM / 01</b><small>專屬重型卡車展示間</small></div></div>
+  <div class="showroom-controls">
+    <button id="viewFront" title="車頭視角">車頭</button>
+    <button id="viewSide" title="側面視角">側面</button>
+    <button id="viewRear" title="車尾視角">車尾</button>
+    <button id="viewHigh" title="高角度視角">俯視</button>
+    <i></i>
+    <button id="zoomOut" title="縮小">−</button>
+    <button id="zoomIn" title="放大">＋</button>
+    <button id="rotateToggle" class="active" title="切換自動旋轉">⟳ 自動旋轉</button>
+    <button id="viewReset" title="重設視角">重設</button>
+  </div>
+  <div class="showroom-focus" aria-label="零件快速檢視">
+    <span>快速檢視</span>
+    <button data-focus="paint" title="車身烤漆">烤漆</button>
+    <button data-focus="wheel" title="輪框與輪胎">輪框</button>
+    <button data-focus="front" title="車頭與保險桿">車頭</button>
+    <button data-focus="exhaust" title="排氣管">排氣管</button>
+    <button data-focus="roof" title="車頂燈具">車頂</button>
+    <button data-focus="trailer" title="拖車與車斗">拖車</button>
+    <button data-focus="overview" title="整車總覽">整車</button>
+  </div>
+  <div class="showroom-tip">拖曳畫面旋轉視角　・　滾輪縮放　・　選擇改裝項目自動靠近零件</div>
 </div>
 
 <div id="toast"></div>
