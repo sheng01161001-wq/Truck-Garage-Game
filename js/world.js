@@ -79,6 +79,7 @@ let showroomLights = [];
 
 export function setWet(w) {
   for (const o of wetMats) {
+    if (!o.snowK) { o.snowK = true; const had = !!o.mat.userData.snowK; addSnow(o.mat, 0.35); if (!had) o.mat.needsUpdate = true; } // 路面只積一點雪
     o.mat.roughness = w ? o.wet : o.dry;
     o.mat.color.copy(w ? o.wetColor : o.dryColor);
   }
@@ -122,7 +123,28 @@ export function updateTrafficLights(t) {
 
 const puddles = [];
 
-function stdMat(opts) { return new THREE.MeshStandardMaterial(opts); }
+// v30：下雪時朝上的面（地面、屋頂、樹頂、山坡）慢慢變白；路面只積一點點
+const SNOW = { value: 0 };
+export function setSnow(k) { SNOW.value = k; }
+export function addSnow(m, amt = 1) {
+  if (m.userData.snowK) { m.userData.snowK.value = amt; return m; } // 已經加過：只改積雪量
+  const k = { value: amt }, prev = m.onBeforeCompile; m.userData.snowK = k;
+  m.onBeforeCompile = (sh, r) => {
+    if (prev) prev.call(m, sh, r);
+    sh.uniforms.uSnow = SNOW; sh.uniforms.uSnowK = k;
+    sh.fragmentShader = sh.fragmentShader.replace('void main() {', 'uniform float uSnow;\nuniform float uSnowK;\nvoid main() {')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      {
+        vec3 wN = inverseTransformDirection(normal, viewMatrix);
+        float sn = uSnow * uSnowK * smoothstep(0.45, 0.85, wN.y);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.95, 0.98), sn);
+        roughnessFactor = mix(roughnessFactor, 0.75, sn);
+      }`);
+  };
+  m.customProgramCacheKey = () => 'snow-v1' + (prev ? '+chain' : '');
+  return m;
+}
+function stdMat(opts) { return addSnow(new THREE.MeshStandardMaterial(opts)); }
 function mesh(geo, mat, x, y, z, parent, { cast = true, recv = true, ry = 0 } = {}) {
   const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.y = ry; m.castShadow = cast; m.receiveShadow = recv; parent.add(m); return m;
 }

@@ -165,6 +165,7 @@ body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: non
 .fin-bar i { display: block; width: 100%; max-width: 26px; border-radius: 4px 4px 0 0; }
 .fin-bar i.up { background: linear-gradient(#80e0a5, #2e9d5b); } .fin-bar i.down { background: linear-gradient(#ff9b9b, #c0392b); }
 .fin-bar small { font-size: 9px; color: #9eacb9; margin-top: 3px; white-space: nowrap; }
+#windshieldDrops { position: fixed; inset: 0; z-index: 3; pointer-events: none; display: none; }
 #ver { position: fixed; left: 8px; bottom: 2px; font-size: 11px; color: rgba(255,255,255,.4); z-index: 5; pointer-events: none; }
 
 

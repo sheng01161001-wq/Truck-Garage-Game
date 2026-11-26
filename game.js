@@ -1,8 +1,8 @@
-// 卡車改裝王 v29（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v30（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
-  setWet, setNight, lampPositions, updateTrafficLights, updateWorldAnim, setShowroomLights, ROADS, hasLight, lightState,
+  setWet, setSnow, setNight, lampPositions, updateTrafficLights, updateWorldAnim, setShowroomLights, ROADS, hasLight, lightState,
 } from './js/world.js';
 import { buildRig, setTruckLights } from './js/truck.js';
 import { createEnv } from './js/env.js';
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v29';
+const VERSION = 'v30';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -177,8 +177,8 @@ function loadSave() {
       for (const k of ['cabDecalRotation','trailerDecalRotation']) if (Number.isFinite(s.truck[k])) out.truck[k] = clamp(s.truck[k], -180, 180);
     }
     if (s.settings && typeof s.settings === 'object') {
-      if (['day', 'dusk', 'night'].includes(s.settings.time)) out.settings.time = s.settings.time;
-      if (['clear', 'rain', 'fog'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
+      if (['day', 'dusk', 'night', 'auto'].includes(s.settings.time)) out.settings.time = s.settings.time;
+      if (['clear', 'rain', 'fog', 'snow'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
       if (['high', 'low'].includes(s.settings.quality)) out.settings.quality = s.settings.quality;
       if (['few', 'normal', 'many'].includes(s.settings.traffic)) out.settings.traffic = s.settings.traffic;
     }
@@ -542,16 +542,38 @@ $('#coins').addEventListener('click', () => {
 });
 
 // ---- 環境（時間、天氣、畫質） ----
-const TIME_N = { day: '☀️ 白天', dusk: '🌇 黃昏', night: '🌙 晚上' }, WEATHER_N = { clear: '🌤 晴天', rain: '🌧 下雨', fog: '🌫 起霧' };
+const TIME_N = { day: '☀️ 白天', dusk: '🌇 黃昏', night: '🌙 晚上', auto: '🔄 自動日夜' }, WEATHER_N = { clear: '🌤 晴天', rain: '🌧 下雨', fog: '🌫 起霧', snow: '❄️ 下雪' };
+// v30：自動日夜循環（12 分鐘一輪：白天 → 黃昏 → 晚上 → 清晨 → 白天，中間慢慢過渡）
+const DAY_CYCLE = [['day', 300], ['day>dusk', 30], ['dusk', 30], ['dusk>night', 30], ['night', 240], ['night>dusk', 30], ['dusk', 30], ['dusk>day', 30]];
+const DAY_LEN = DAY_CYCLE.reduce((a, b) => a + b[1], 0);
+let dayT = 0, dayKey = '', dayMixT = 0;
+function dayPhase() {
+  let t = dayT % DAY_LEN;
+  for (const [k, len] of DAY_CYCLE) { if (t < len) return { k, f: t / len }; t -= len; }
+  return { k: 'day', f: 0 };
+}
+function updateDayCycle(dt) {
+  if (save.settings.time !== 'auto' || inGarage()) return;
+  dayT += dt; dayMixT -= dt;
+  const ph = dayPhase();
+  if (ph.k.includes('>')) {
+    if (dayMixT > 0) return; dayMixT = 0.5; // 過渡中每半秒更新一次光線
+    const [a, b] = ph.k.split('>'), k = ph.f;
+    const st = env.apply(k < 0.5 ? a : b, save.settings.weather, env.mixTimes(a, b, k * k * (3 - 2 * k)), false);
+    setNight(st.night); dayKey = ph.k; return;
+  }
+  if (dayKey !== ph.k) { dayKey = ph.k; applyEnv(); }
+}
+function effectiveTime() { if (save.settings.time !== 'auto') return save.settings.time; const k = dayPhase().k; return k.includes('>') ? k.split('>')[1] : k; }
 function applyEnv() {
-  const st = env.apply(save.settings.time, save.settings.weather);
-  setNight(st.night); setWet(st.wet);
+  const st = env.apply(effectiveTime(), save.settings.weather);
+  setNight(st.night); setWet(st.wet); setSnow(st.snow ? 1 : 0);
   if (!S.lightsManual) S.lights = st.night > 0.3 || save.settings.weather !== 'clear';
-  S.wipers = save.settings.weather === 'rain';
+  S.wipers = save.settings.weather === 'rain' || save.settings.weather === 'snow';
   refreshButtons();
 }
 function cycleEnv(kind) {
-  const list = kind === 'time' ? ['day', 'dusk', 'night'] : ['clear', 'rain', 'fog'];
+  const list = kind === 'time' ? ['day', 'dusk', 'night', 'auto'] : ['clear', 'rain', 'fog', 'snow'];
   save.settings[kind] = list[(list.indexOf(save.settings[kind]) + 1) % list.length];
   S.lightsManual = false; persist(); applyEnv(); renderEnvPanel();
   toast(kind === 'time' ? TIME_N[save.settings.time] : WEATHER_N[save.settings.weather], 1000);
@@ -980,7 +1002,8 @@ function drive(dt) {
   const wet = env.state.wet;
   const loadGrip = clamp(1 - tons * 0.0035, 0.88, 1);
   const tireT = save.truck.tires, wetMul = tireT === 'allweather' ? 0.9 : 0.78, dryMul = tireT === 'sport' ? 1.1 : 1;
-  const grip = (surf === 'road' ? 1 : surf === 'gravel' ? 0.72 : 0.78) * (wet ? wetMul : 1) * dryMul * loadGrip;
+  const snowMul = env.state.snow ? (tireT === 'allweather' ? 0.78 : 0.6) : 1; // 雪地很滑（全天候輪胎好一點）
+  const grip = (surf === 'road' ? 1 : surf === 'gravel' ? 0.72 : 0.78) * (wet ? wetMul : 1) * snowMul * dryMul * loadGrip;
   const crr = surf === 'road' ? 0.008 : surf === 'gravel' ? 0.042 : 0.028;
   S.speedLimit = speedLimitAt(S.x, S.z, S.y);
   // 油門、煞車慢慢踩下去
@@ -1125,6 +1148,7 @@ function drive(dt) {
   }
   restService(dt, stopped);
   if (wet && Math.abs(S.v) > 16 && !S.hint) S.hint = '🌧 下雨路滑：煞車距離變長，跟前車保持距離';
+  if (env.state.snow && Math.abs(S.v) > 12 && !S.hint) S.hint = '❄️ 雪地很滑：慢慢開、提早煞車';
   redLightCheck();
   // 方向燈自動回正
   if ((S.ind === 'L' || S.ind === 'R') && Math.abs(S.steer) > 0.25) S.indArmed = true;
@@ -1365,6 +1389,36 @@ function renderMirrors() {
   renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
   renderer.autoClear = auto; renderer.shadowMap.autoUpdate = shadowAuto;
 }
+// v30：駕駛座看出去的擋風玻璃雨滴（開雨刷會刷掉）
+const wsCv = document.createElement('canvas'); wsCv.id = 'windshieldDrops'; document.body.appendChild(wsCv);
+const wsCtx = wsCv.getContext('2d'); const drops = []; let wsWipe = 0;
+function drawWindshield(dt) {
+  const on = document.body.classList.contains('cab-view') && (save.settings.weather === 'rain' || save.settings.weather === 'snow') && !S.tunNear;
+  wsCv.style.display = on ? 'block' : 'none';
+  if (!on) { drops.length = 0; return; }
+  const W = window.innerWidth, H = window.innerHeight;
+  if (wsCv.width !== W || wsCv.height !== H) { wsCv.width = W; wsCv.height = H; }
+  const snowy = save.settings.weather === 'snow';
+  const rate = (snowy ? 14 : 40) * (1 + Math.abs(S.v) / 15);
+  for (let k = Math.floor(rate * dt + Math.random()); k > 0; k--) if (drops.length < 260) drops.push({ x: Math.random() * W, y: Math.random() * H * 0.62, r: (snowy ? 2.5 : 1.5) + Math.random() * (snowy ? 4 : 3.5), a: 0 });
+  // 雨刷掃過去：從左到右刷掉
+  if (S.wipers) {
+    wsWipe = (wsWipe + dt * 1.6) % 2;
+    const sweep = wsWipe < 1 ? wsWipe : 2 - wsWipe, xw = sweep * W;
+    for (let i = drops.length - 1; i >= 0; i--) if (Math.abs(drops[i].x - xw) < W * 0.08) drops.splice(i, 1);
+  }
+  // 開快一點，雨滴會往上往旁邊流
+  for (const d of drops) { d.a = Math.min(1, d.a + dt * 4); if (!snowy && Math.abs(S.v) > 8) { d.y -= Math.abs(S.v) * dt * 2; d.x += (d.x - W / 2) * dt * 0.08; } }
+  for (let i = drops.length - 1; i >= 0; i--) if (drops[i].y < -10) drops.splice(i, 1);
+  wsCtx.clearRect(0, 0, W, H);
+  for (const d of drops) {
+    wsCtx.globalAlpha = d.a * (snowy ? 0.85 : 0.55);
+    wsCtx.fillStyle = snowy ? 'rgba(245,248,255,.9)' : 'rgba(190,205,220,.35)';
+    wsCtx.beginPath(); wsCtx.arc(d.x, d.y, d.r, 0, Math.PI * 2); wsCtx.fill();
+    if (!snowy) { wsCtx.fillStyle = 'rgba(255,255,255,.7)'; wsCtx.beginPath(); wsCtx.arc(d.x - d.r * 0.35, d.y - d.r * 0.35, d.r * 0.3, 0, Math.PI * 2); wsCtx.fill(); }
+  }
+  wsCtx.globalAlpha = 1;
+}
 // 儀表板螢幕、導航螢幕：用 HUD 的儀表和小地圖畫面
 let clusterTex = null, navTex = null;
 function updateCabScreens() {
@@ -1406,6 +1460,7 @@ function frame(dt) {
   // 紅綠燈、車流、路燈光
   updateTrafficLights(S.time);
   updateWorldAnim(S.time, dt);
+  updateDayCycle(dt);
   const pts = rigPoints(S.x, S.z, S.heading, S.trailerHeading);
   // 卡車在高架橋上時，橋下的車不用讓它（把卡車位置移到很遠的地方給車流看）
   const tPts = S.y > 2.5 && inCity(S.x, S.z) ? pts.map((p) => ({ ...p, x: p.x + 5000 })) : pts;
@@ -1426,6 +1481,8 @@ function frame(dt) {
   env.update(dt, focus, camera.position, !inGarage() && inTunnel(camera.position.x, camera.position.y, camera.position.z));
   if (S.mode === 'drive') updateHud(dt);
   updateCabScreens();
+  env.setCabClip(document.body.classList.contains('cab-view'));
+  drawWindshield(dt);
   const fov = baseFov(); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   if (post) {
     // 太慢（平均一格超過 30 毫秒）：先關掉角落陰影
@@ -1438,7 +1495,7 @@ function frame(dt) {
 
 // ================= 開始 =================
 window.__truck = { S, get save() { return save; }, hit: () => hitTest(S.x, S.z, S.heading, S.trailerHeading), boxes, input,
-  step(n = 60) { for (let i = 0; i < n; i++) frame(1 / 60); }, get post() { return post; }, applyEnv, openGarage, closeGarage, traffic, dispatchUnit };
+  step(n = 60) { for (let i = 0; i < n; i++) frame(1 / 60); }, get post() { return post; }, setDay(t) { dayT = t; dayKey = ''; dayMixT = 0; }, applyEnv, openGarage, closeGarage, traffic, dispatchUnit };
 newMission();
 rebuildRig(save.truck);
 applyEnv();
