@@ -49,6 +49,50 @@ function mats() {
   return M;
 }
 
+// ---------- v32：外部 GLB 車頭模型（models/truck/truck.glb） ----------
+// 節點名稱用「圖層__零件」：cab__ 跟著駕駛室點頭、tractor__ 底盤、kit_xxx__ 改裝件、trailer__／wheel__ 不用（拖車和輪子維持程式畫的）
+// 換成自己下載的模型也行：照這個命名規則在 Blender 裡改名後匯出同一個檔名即可
+let GLB = null, glbOn = true;
+export function loadTruckGLB(url = 'models/truck/truck.glb') {
+  return import('three/addons/loaders/GLTFLoader.js')
+    .then(({ GLTFLoader }) => new GLTFLoader().loadAsync(url))
+    .then((g) => { GLB = g.scene; return true; })
+    .catch(() => false);
+}
+export function setTruckGLB(on) { glbOn = !!on; }
+export function truckGLBReady() { return !!GLB; }
+const GLB_SKIP = /^(windshield|sidewin|sleeperwin|headlight|indicator|rail|fifthwheel|axle|faxle|rear_fender|mudflap|airtank)$/;
+const GLB_KIT = { kit_bumper_chromeb: (c) => c.bumper === 'chromeb', kit_bumper_bull: (c) => c.bumper === 'bull', kit_spoiler: (c) => c.spoiler === 'on', kit_lightbar: (c) => c.lightbar === 'on', kit_visor: (c) => c.visor === 'on', kit_stacks: (c) => c.stacks === 'on', kit_skirts: (c) => c.skirts === 'on' };
+function addGLB(cfg, targets, matFor) {
+  const list = [];
+  GLB.traverse((o) => {
+    if (!o.isMesh) return;
+    let n = o.name, q = o;
+    while (q && !n.includes('__')) { q = q.parent; n = q ? q.name : ''; }
+    const mm = /^([a-z_]+?)__([a-z_]+)/i.exec(n); if (!mm) return;
+    const [, layer, piece] = mm;
+    if (GLB_SKIP.test(piece)) return;
+    if (layer === 'trailer' || layer === 'wheel') return;
+    if (layer.startsWith('kit_') && !(GLB_KIT[layer] && GLB_KIT[layer](cfg))) return;
+    if (layer === 'tractor' && !/^(tank|tank_strap|battery)$/.test(piece)) return;
+    if (layer === 'kit_bumper_chromeb' || layer === 'kit_bumper_bull') list.push(['bumper_kit', o]);
+    list.push([layer, o]);
+  });
+  // 有改裝保險桿就不要原廠的
+  const hasKitBumper = list.some(([l]) => l === 'bumper_kit');
+  for (const [layer, o] of list) {
+    if (layer === 'bumper_kit') continue;
+    if (hasKitBumper && /__bumper/.test(o.name)) continue;
+    const c = o.clone(false);
+    o.updateWorldMatrix(true, false); c.matrix.copy(o.matrixWorld); c.matrix.decompose(c.position, c.quaternion, c.scale);
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const mapped = mats.map((mt) => matFor(mt.name, layer));
+    c.material = mapped.length === 1 ? mapped[0] : mapped;
+    c.castShadow = true; c.receiveShadow = true;
+    (layer === 'tractor' || layer === 'kit_skirts' ? targets.tractor : targets.cab).add(c);
+  }
+}
+
 // 燈光狀態（大燈、煞車、方向燈、倒車、燈條）
 export function setTruckLights(s) {
   const m = mats();
@@ -175,7 +219,7 @@ function makeFlakeRoughnessMap() {
 function makePaintMat(paint, tex) {
   const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: tex });
   // 預設原廠烤漆也保留清漆層，讓車身高光更接近汽車烤漆
-  m.metalness = 0.05; m.roughness = 0.32; m.clearcoat = 1; m.clearcoatRoughness = 0.09;
+  m.metalness = 0.6; m.roughness = 0.3; m.clearcoat = 1; m.clearcoatRoughness = 0.06; m.envMapIntensity = 1.2;
   switch (paint) {
     case 'matte':
       m.metalness = 0.02; m.roughness = 0.88; m.clearcoat = 0.08; break;
@@ -236,6 +280,38 @@ function drawArtwork(ctx, w, h, cfg, prefix, redraw) {
   ctx.drawImage(img,-img.naturalWidth*ratio/2,-img.naturalHeight*ratio/2,img.naturalWidth*ratio,img.naturalHeight*ratio);ctx.restore();
 }
 
+// v32：拖車側板的波浪板凹凸（法線貼圖，共用一張）
+let RIB = null;
+function ribNormal() {
+  if (RIB) return RIB;
+  const w = 1024, h = 8, cv = makeCanvas(w, h), ctx = cv.getContext('2d'), d = ctx.createImageData(w, h);
+  const P = 22.6; // 約 30 公分一道
+  for (let x = 0; x < w; x++) {
+    // 梯形波：斜面的地方法線往左右偏
+    const t = (x % P) / P;
+    const slope = t < 0.15 ? 1 : t < 0.5 ? 0 : t < 0.65 ? -1 : 0;
+    const nx = -slope * 0.7, nz = Math.sqrt(1 - nx * nx);
+    for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; d.data[i] = (nx * 0.5 + 0.5) * 255; d.data[i + 1] = 128; d.data[i + 2] = nz * 255; d.data[i + 3] = 255; }
+  }
+  ctx.putImageData(d, 0, 0);
+  RIB = new THREE.CanvasTexture(cv); RIB.colorSpace = THREE.NoColorSpace; RIB.anisotropy = 8; SHARED.add(RIB);
+  return RIB;
+}
+
+// v32：大燈光錐、路面光斑的漸層貼圖
+const BEAM_TEX = {};
+function beamTexture(kind) {
+  if (BEAM_TEX[kind]) return BEAM_TEX[kind];
+  const cv = makeCanvas(128, 128), g = cv.getContext('2d');
+  if (kind === 'cone') { // 靠近燈最亮，越遠越淡
+    const gr = g.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  } else { // 橢圓光斑，邊緣柔和
+    const gr = g.createRadialGradient(64, 64, 4, 64, 64, 64); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  }
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; SHARED.add(t); BEAM_TEX[kind] = t; return t;
+}
 // ======================================================================
 export function buildRig(cfg, dirt = 0) {
   const m = mats(), W = wheelGeos();
@@ -257,6 +333,8 @@ export function buildRig(cfg, dirt = 0) {
 
   const US = cfg.cabStyle === 'us';
   const cham = cfg.paint === 'chameleon';
+  // 歐式車頭、沒有彩繪圖案／自訂貼圖時用 GLB 模型（圖案要貼在程式畫的車殼上才對得準）
+  const G = !!GLB && glbOn && !US && (cfg.pattern || 'none') === 'none' && !cfg.cabDecalData;
   const base = cham ? '#ffffff' : cfg.cabColor;
   const cabS = surface(512, 512, (ctx, w, h, redraw) => { fillPaint(ctx, w, h, base, cfg.cabColor2, cfg.cabGradient); drawPattern(ctx, w, h, cfg.pattern, cfg.patternColor); drawArtwork(ctx,w,h,cfg,'cab',redraw); });
   const plainS = surface(64, 64, (ctx, w, h) => { fillPaint(ctx, w, h, base, cfg.cabColor2, cfg.cabGradient); });
@@ -354,13 +432,15 @@ export function buildRig(cfg, dirt = 0) {
   // 變速箱
   part(tractor, rbox(0.55, 0.5, 0.9, 0.08), m.chassis, 0, 0.95, 3.15);
   // 油箱（鋁）＋綁帶
-  part(tractor, rbox(0.62, 0.62, 1.4, 0.26), cfg.tanks === 'chrome' ? m.chrome : m.alu, 1.0, 1.0, 2.25);
-  for (const z of [1.8, 2.7]) part(tractor, box(0.66, 0.66, 0.05), m.black, 1.0, 1.0, z);
+  if (!G) {
+    part(tractor, rbox(0.62, 0.62, 1.4, 0.26), cfg.tanks === 'chrome' ? m.chrome : m.alu, 1.0, 1.0, 2.25);
+    for (const z of [1.8, 2.7]) part(tractor, box(0.66, 0.66, 0.05), m.black, 1.0, 1.0, z);
+  }
   // 電瓶箱、儲氣筒
   part(tractor, rbox(0.55, 0.5, 0.8, 0.04), m.black, -1.0, 1.05, 1.9);
   for (const y of [0.78, 1.12]) part(tractor, cyl(0.15, 0.15, 0.9, 14), m.steel, -0.95, y, 2.85, Math.PI / 2);
   // v26：車頭側裙（前輪和後輪中間，同車身色）
-  if (cfg.skirts === 'on') for (const sx of [1, -1]) part(tractor, rbox(0.06, 0.62, 2.1, 0.03), paintPlain, sx * 1.34, 1.05, 2.3);
+  if (cfg.skirts === 'on' && !G) for (const sx of [1, -1]) part(tractor, rbox(0.06, 0.62, 2.1, 0.03), paintPlain, sx * 1.34, 1.05, 2.3);
   // 後擋泥板、擋泥皮
   for (const sx of [1, -1]) {
     part(tractor, rbox(0.75, 0.07, 2.9, 0.03), m.plastic, sx * 0.92, 1.2, 0);
@@ -385,14 +465,14 @@ export function buildRig(cfg, dirt = 0) {
   }
   // 前保險桿、霧燈、車牌、拖車勾
   const bumperMat = cfg.bumper === 'chromeb' || US ? m.chrome : m.chassis;
-  part(tractor, rbox(2.5, 0.5, 0.36, 0.08), bumperMat, 0, 1.15, bumperZ);
+  if (!G) part(tractor, rbox(2.5, 0.5, 0.36, 0.08), bumperMat, 0, 1.15, bumperZ);
   for (const sx of [1, -1]) {
     part(tractor, cyl(0.09, 0.09, 0.05, 16), m.head, sx * 0.85, 1.12, bumperZ + 0.17, Math.PI / 2);
   }
   const plate = plateTex(US ? 'KLC-7788' : 'KLA-0168'); own.push(plate);
   const plateMat = new THREE.MeshStandardMaterial({ map: plate, roughness: 0.4 }); own.push(plateMat);
   part(tractor, box(0.52, 0.13, 0.02), plateMat, 0, 1.08, bumperZ + 0.19);
-  if (cfg.bumper === 'bull') {
+  if (cfg.bumper === 'bull' && !G) {
     const z = bumperZ + 0.42;
     for (const x of [-1.0, -0.4, 0.4, 1.0]) part(tractor, cyl(0.06, 0.06, 1.5, 10), m.chrome, x, 1.75, z);
     for (const y of [1.4, 2.45]) part(tractor, cyl(0.06, 0.06, 2.25, 10), m.chrome, 0, y, z, 0, 0, Math.PI / 2);
@@ -400,8 +480,10 @@ export function buildRig(cfg, dirt = 0) {
 
   // --- 駕駛室 ---
   if (!US) {
-    part(C, rbox(2.5, 2.75, 2.25, 0.14, 4), paint, 0, 2.72, 4.22);
-    part(C, rbox(2.44, 0.5, 2.15, 0.16, 4), paintPlain, 0, 4.25, 4.18); // 高頂
+    if (!G) {
+      part(C, rbox(2.5, 2.75, 2.25, 0.14, 4), paint, 0, 2.72, 4.22);
+      part(C, rbox(2.44, 0.5, 2.15, 0.16, 4), paintPlain, 0, 4.25, 4.18); // 高頂
+    }
     // 擋風玻璃（外框四條，中間看得穿）
     const wg = part(C, box(2.22, 1.15, 0.03), m.glass, 0, 3.42, 5.37, -0.1); windshield.push(wg);
     part(C, box(2.34, 0.08, 0.06), m.black, 0, 4.02, 5.31, -0.1);
@@ -410,6 +492,7 @@ export function buildRig(cfg, dirt = 0) {
     // 側窗、門縫、門把、踏板
     for (const sx of [1, -1]) {
       windshield.push(part(C, box(0.03, 0.85, 1.05), m.glass, sx * 1.255, 3.45, 4.75));
+      if (G) continue; // 門縫、門把、踏板、後照鏡由 GLB 模型提供
       part(C, box(0.012, 2.3, 0.025), m.black, sx * 1.252, 2.6, 4.18);
       part(C, box(0.012, 2.3, 0.025), m.black, sx * 1.252, 2.6, 5.28);
       part(C, box(0.04, 0.06, 0.26), m.chrome, sx * 1.27, 2.8, 4.35);
@@ -422,8 +505,10 @@ export function buildRig(cfg, dirt = 0) {
       part(C, rbox(0.11, 0.3, 0.28, 0.04), m.black, sx * 1.66, 2.88, 5.12);
     }
     // 水箱罩、標誌、大燈、方向燈
-    part(C, box(1.95, 1.05, 0.05), m.grille, 0, 2.18, 5.36);
-    for (let i = 0; i < 5; i++) part(C, box(1.85, 0.05, 0.06), m.chrome, 0, 1.78 + i * 0.2, 5.39);
+    if (!G) {
+      part(C, box(1.95, 1.05, 0.05), m.grille, 0, 2.18, 5.36);
+      for (let i = 0; i < 5; i++) part(C, box(1.85, 0.05, 0.06), m.chrome, 0, 1.78 + i * 0.2, 5.39);
+    }
     part(C, cyl(0.14, 0.14, 0.03, 24), m.chrome, 0, 2.78, 5.4, Math.PI / 2);
     for (const sx of [1, -1]) {
       part(C, rbox(0.58, 0.3, 0.08, 0.04), m.black, sx * 0.9, 1.6, 5.36);
@@ -432,7 +517,7 @@ export function buildRig(cfg, dirt = 0) {
       part(C, box(0.12, 0.16, 0.03), sx > 0 ? m.indL : m.indR, sx * 1.2, 1.6, 5.4);
     }
     // 車頂黃色示寬燈
-    for (let i = 0; i < 5; i++) part(C, box(0.14, 0.06, 0.06), m.marker, -0.6 + i * 0.3, 4.5, 5.25);
+    if (!G) for (let i = 0; i < 5; i++) part(C, box(0.14, 0.06, 0.06), m.marker, -0.6 + i * 0.3, 4.5, 5.25);
     // 雨刷
     for (const px of [0.62, -0.42]) {
       const p = new THREE.Group(); p.position.set(px, 2.92, 5.44); C.add(p);
@@ -452,12 +537,31 @@ export function buildRig(cfg, dirt = 0) {
     steeringWheel = sw;
     camLocal = new THREE.Vector3(0.6, 3.82, 3.7); // 駕駛眼睛：坐高一點、離儀表板遠一點
     // 遮陽板、燈條、導流罩
-    if (cfg.visor === 'on') part(C, box(2.45, 0.06, 0.48), paintPlain, 0, 4.1, 5.52, 0.25);
-    if (cfg.lightbar === 'on') {
+    if (cfg.visor === 'on' && !G) part(C, box(2.45, 0.06, 0.48), paintPlain, 0, 4.1, 5.52, 0.25);
+    if (cfg.lightbar === 'on' && !G) {
       part(C, rbox(2.0, 0.16, 0.22, 0.05), m.black, 0, 4.62, 5.12);
       for (let i = 0; i < 6; i++) part(C, box(0.26, 0.11, 0.03), m.bar, -0.8 + i * 0.32, 4.62, 5.24);
     }
-    if (cfg.spoiler === 'on') part(C, rbox(2.4, 0.9, 1.9, 0.2), paintPlain, 0, 4.85, 4.0, -0.35);
+    if (cfg.spoiler === 'on' && !G) part(C, rbox(2.4, 0.9, 1.9, 0.2), paintPlain, 0, 4.85, 4.0, -0.35);
+    if (G) {
+      // GLB 材質換成遊戲自己的（烤漆顏色、燈會亮、鍍鉻反光都跟著設定）
+      const glbMat = (name, layer) => {
+        if (/^PAINT/.test(name)) return paintPlain;
+        if (name === 'chrome') return layer === 'tractor' && cfg.tanks !== 'chrome' ? m.alu : m.chrome;
+        if (name === 'alu') return layer === 'tractor' && cfg.tanks === 'chrome' ? m.chrome : m.alu;
+        if (name === 'headlight') return layer === 'kit_lightbar' ? m.bar : m.head;
+        if (name === 'amber') return m.marker;
+        if (name === 'tail') return m.tail;
+        if (name === 'glass') return m.glass;
+        if (name === 'grille') return m.grille;
+        if (name === 'steel') return m.steel;
+        if (name === 'frame') return m.chassis;
+        if (name === 'rubber') return m.rubber;
+        if (name === 'black') return m.black;
+        return m.plastic;
+      };
+      addGLB(cfg, { cab: C, tractor }, glbMat);
+    }
   } else {
     // 美式長鼻：駕駛室＋長引擎蓋
     part(C, rbox(2.4, 2.4, 1.9, 0.15, 4), paint, 0, 3.0, 2.5);
@@ -514,12 +618,12 @@ export function buildRig(cfg, dirt = 0) {
     if (cfg.spoiler === 'on') part(C, rbox(2.3, 0.9, 1.7, 0.2), paintPlain, 0, 4.55, 2.4, -0.3);
   }
   // 直立排氣管（美式車頭也可以裝）
-  if (cfg.stacks === 'on') {
+  if (cfg.stacks === 'on' && !G) {
     for (const sx of [1, -1]) {
       part(C, cyl(0.12, 0.12, 3.4, 16), m.chrome, sx * 1.12, 3.0, cabBackZ - 0.18);
       part(C, cyl(0.15, 0.12, 0.35, 16), m.chrome, sx * 1.12, 4.8, cabBackZ - 0.18, 0.25);
     }
-  } else {
+  } else if (cfg.stacks !== 'on') {
     part(tractor, rbox(0.5, 0.45, 0.7, 0.1), m.steel, 1.0, 1.05, 3.1);
   }
   // 頭燈光束（晚上才開）；v26 大燈顏色
@@ -531,6 +635,21 @@ export function buildRig(cfg, dirt = 0) {
     sp.position.set(sx * 0.9, hy, hz); sp.target.position.set(sx * 1.5, 0, hz + 30);
     C.add(sp, sp.target); spots.push(sp);
   }
+  // v32：晚上看得到的大燈光錐（從燈往前斜下打到路面）＋路面上的光斑
+  const beams = [];
+  const beamMat = (base, tex) => { const mm = new THREE.MeshBasicMaterial({ color: HEAD_COL[cfg.headlight] || 0xfff2dd, map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false }); mm.userData = {}; own.push(mm); return mm; };
+  const coneTex = beamTexture('cone'), poolTex = beamTexture('pool');
+  for (const sx of [1, -1]) {
+    const len = 26, cg = new THREE.ConeGeometry(3.2, len, 20, 1, true); geos.push(cg);
+    cg.translate(0, -len / 2, 0); // 尖端在燈上
+    const cone = new THREE.Mesh(cg, beamMat(0.1, coneTex)); cone.userData.base = 0.1;
+    cone.position.set(sx * 0.9, hy, hz + 0.05);
+    cone.rotation.x = -Math.PI / 2 + Math.atan2(hy - 0.1, len * 0.95); // 往前、慢慢往下碰到地面
+    cone.renderOrder = 3; cone.visible = false; cone.castShadow = false; C.add(cone); beams.push(cone);
+  }
+  const pg = new THREE.PlaneGeometry(7.5, 22); geos.push(pg); pg.rotateX(-Math.PI / 2);
+  const pool = new THREE.Mesh(pg, beamMat(0.45, poolTex)); pool.userData.base = 0.45;
+  pool.position.set(0, 0.06, hz + 13); pool.renderOrder = 2; pool.visible = false; tractor.add(pool); beams.push(pool);
 
   // 前輪、後輪（雙輪）
   for (const sx of [1, -1]) {
@@ -599,7 +718,7 @@ export function buildRig(cfg, dirt = 0) {
       c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(w / 2 - 2, 0, 4, h);
       c.fillStyle = 'rgba(0,0,0,.25)'; for (const y of [30, 120, 210, 280]) { c.fillRect(4, y, 22, 10); c.fillRect(w - 26, y, 22, 10); }
     });
-    const sideM = tMat(sideS), endM = tMat(endS), doorM = tMat(doorS);
+    const sideM = tMat(sideS, { normalMap: ribNormal(), normalScale: new THREE.Vector2(1.4, 1.4), roughness: 0.38, metalness: 0.35 }), endM = tMat(endS), doorM = tMat(doorS);
     part(T, rbox(2.55, 3.0, 13.6, 0.06, 2), [sideM, sideM, endM, m.chassis, endM, doorM], 0, 2.95, -5.9);
     for (const sx of [1, -1]) {
       part(T, box(0.06, 0.1, 13.6), m.alu, sx * 1.27, 4.42, -5.9);
@@ -653,7 +772,7 @@ export function buildRig(cfg, dirt = 0) {
 
   return {
     tractor, cab, trailer, trailerBody: tBody, front, spins, trailerSpins: tSpins, wipers, steeringWheel, spots, windshield,
-    camLocal, cabInner: C, frontZ: US ? 6.6 : 5.7, screenMats, mirrorLocal: US ? [new THREE.Vector3(1.5, 3.4, 3.2), new THREE.Vector3(-1.5, 3.4, 3.2)] : [new THREE.Vector3(1.45, 3.3, 5.1), new THREE.Vector3(-1.45, 3.3, 5.1)], paint, paintPlain, rimMat: cfg.rims === 'color' ? rimMat : null,
+    beams, camLocal, cabInner: C, frontZ: US ? 6.6 : 5.7, screenMats, mirrorLocal: US ? [new THREE.Vector3(1.5, 3.4, 3.2), new THREE.Vector3(-1.5, 3.4, 3.2)] : [new THREE.Vector3(1.45, 3.3, 5.1), new THREE.Vector3(-1.45, 3.3, 5.1)], paint, paintPlain, rimMat: cfg.rims === 'color' ? rimMat : null,
     chameleon: cham, glowMat, glowLight, rainbowGlow: cfg.glow === 'rainbow',
     setLoaded(v) { if (load) load.visible = v; },
     redrawDirt(d) { surfaces.forEach((s) => s.redraw(d)); },

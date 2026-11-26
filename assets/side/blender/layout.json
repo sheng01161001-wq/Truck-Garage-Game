@@ -1,0 +1,66 @@
+{
+ "pxPerM": 38.4,
+ "resMul": 3,
+ "frame": [
+  10.0,
+  92.63999999999999,
+  720.0,
+  207.36
+ ],
+ "layers": [
+  "trailer",
+  "tractor",
+  "cab",
+  "kit_bumper_chromeb",
+  "kit_bumper_bull",
+  "kit_spoiler",
+  "kit_lightbar",
+  "kit_visor",
+  "kit_stacks",
+  "kit_skirts"
+ ],
+ "paint": {
+  "trailer": "PAINT_trailer",
+  "cab": "PAINT_cab",
+  "kit_spoiler": "PAINT_cab",
+  "kit_visor": "PAINT_cab",
+  "kit_skirts": "PAINT_cab"
+ },
+ "wheelR": 21.16608,
+ "axlesTractor": [
+  653.1999999999999,
+  534.16,
+  480.4
+ ],
+ "axlesTrailer": [
+  146.31999999999996,
+  96.39999999999999,
+  46.47999999999997
+ ],
+ "head": [
+  715.7919999999999,
+  238.56
+ ],
+ "tail": [
+  17.67999999999997,
+  260.448
+ ],
+ "stack": [
+  619.024,
+  113.76000000000002
+ ],
+ "exhaust": [
+  618.256,
+  269.28
+ ],
+ "window": [
+  670.4799999999999,
+  150.24,
+  34.56000000000001,
+  36.47999999999999
+ ],
+ "cabPivot": [
+  634.0,
+  253.92000000000002
+ ]
+}

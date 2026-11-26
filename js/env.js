@@ -4,8 +4,8 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { rng } from './util.js';
 
 const TIMES = {
-  day: { elev: 50, azim: 140, lightElev: 50, sunColor: 0xfff3e2, sunI: 3.0, hemiSky: 0xbcd6ff, hemiGround: 0x4f5a3c, hemiI: 1.0, turb: 3, ray: 1.1, mie: 0.004, mieG: 0.8, exposure: 0.62, fog: 0xbfd0df, envI: 1.0, night: 0 },
-  dusk: { elev: 2.5, azim: 250, lightElev: 12, sunColor: 0xffa060, sunI: 3.4, hemiSky: 0xa58fb8, hemiGround: 0x4a3a30, hemiI: 0.8, turb: 9, ray: 3, mie: 0.012, mieG: 0.95, exposure: 0.75, fog: 0xd0a080, envI: 0.85, night: 0.45 },
+  day: { elev: 50, azim: 140, lightElev: 38, sunColor: 0xffead2, sunI: 3.0, hemiSky: 0xbcd6ff, hemiGround: 0x4f5a3c, hemiI: 1.0, turb: 3, ray: 1.1, mie: 0.004, mieG: 0.8, exposure: 0.62, fog: 0xbfd0df, envI: 1.0, night: 0 },
+  dusk: { elev: 2.5, azim: 250, lightElev: 7, sunColor: 0xff9248, sunI: 3.8, hemiSky: 0x9a88b8, hemiGround: 0x4a3a30, hemiI: 0.65, turb: 9, ray: 3, mie: 0.012, mieG: 0.95, exposure: 0.75, fog: 0xd0a080, envI: 0.85, night: 0.45 },
   night: { elev: -14, azim: 200, lightElev: 42, sunColor: 0x9fb4ff, sunI: 0.32, hemiSky: 0x2a3658, hemiGround: 0x0c0e12, hemiI: 0.45, turb: 1.5, ray: 0.4, mie: 0.003, mieG: 0.7, exposure: 0.75, fog: 0x0c1322, envI: 0.25, night: 1 },
 };
 
@@ -116,8 +116,8 @@ export function createEnv(renderer, scene) {
     if (foggy) fc.lerp(new THREE.Color(time === 'night' ? 0x1a1e24 : 0xc4c8cc), 0.75);
     if (snowy) fc.lerp(new THREE.Color(time === 'night' ? 0x1c2230 : 0xdfe5ec), 0.7);
     fogBase.color.copy(fc);
-    fogBase.near = foggy ? 4 : rainy ? 25 : snowy ? 20 : 300;
-    fogBase.far = foggy ? 120 : rainy ? 420 : snowy ? 520 : 2600;
+    fogBase.near = foggy ? 4 : rainy ? 25 : snowy ? 20 : 140; // v32：晴天也有一點淡淡的空氣霧，遠處比較有層次
+    fogBase.far = foggy ? 120 : rainy ? 420 : snowy ? 520 : 1900;
     const nightish = P.night > 0.7;
     sky.visible = !nightish;
     scene.background = nightish ? fc.clone() : null;
@@ -127,18 +127,18 @@ export function createEnv(renderer, scene) {
     rain.visible = rainy; snow.visible = snowy;
     state.night = Math.min(1, P.night * (rainy || snowy ? 1.2 : 1));
     state.wet = rainy; state.snow = snowy;
-    // 反射用環境光：白天晴天用實拍天空（烤漆、電鍍才有真的雲和光），其他時候用程式算的天空
+    // 反射用環境光：白天、黃昏用實拍天空 HDRI（烤漆、電鍍才有真的雲和光），晚上用程式算的暗天空
     if (regen) {
       if (envRT) envRT.dispose();
       envRT = null;
-      if (time === 'day' && !mix && !rainy && !foggy && !snowy && hdrEnv) scene.environment = hdrEnv;
+      if (hdrEnv && P.night < 0.7) scene.environment = hdrEnv;
       else {
         envSky.visible = true;
         envRT = pmrem.fromScene(envScene, 0, 0.1, 3000);
         scene.environment = envRT.texture;
       }
     }
-    scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1);
+    scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1) * (hdrEnv && P.night < 0.7 ? (rainy || foggy || snowy ? 0.6 : 1) * (1 - P.night * 0.9) : 1);
     state.hemiBase = hemi.intensity; state.envBase = scene.environmentIntensity;
     if (regen) { for (let i = 0; i < RAIN; i++) resetDrop(i, 0, 0, 0, true); for (let i = 0; i < SNOW; i++) resetFlake(i, 0, 0, 0, true); }
     return state;

@@ -339,7 +339,81 @@ function grime(g, x, y, w, h) {
 function rr(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r); g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h); g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r); g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath(); }
 function art(g, k) { const im = ART[k]; if (!im) return false; const [x, y, w, h] = ART_BOX[k]; g.drawImage(im, x, y, w, h); return true; }
 
+// ---------------- Blender 算出來的寫實分層圖（assets/side/blender/）----------------
+// 每一層都是同一個框大小的透明 PNG，照順序疊起來；烤漆用遮罩上色（換顏色不用重算圖）
+const BL = { ready: false, layout: null, img: {}, tint: new Map() };
+fetch('assets/side/blender/layout.json').then((r) => (r.ok ? r.json() : null)).then((lay) => {
+  if (!lay) return;
+  const names = [...lay.layers, ...Object.keys(lay.paint).map((k) => k + '_mask'), 'wheel'];
+  let left = names.length;
+  for (const n of names) {
+    const im = new Image();
+    im.onload = () => { BL.img[n] = im; if (--left === 0) { BL.layout = lay; BL.ready = true; } };
+    im.onerror = () => { if (--left === 0 && BL.img.cab && BL.img.trailer) { BL.layout = lay; BL.ready = true; } };
+    im.src = `assets/side/blender/${n}.png`;
+  }
+}).catch(() => {});
+// 烤漆上色：烤漆的地方乘上車色，其他地方（玻璃、鍍鉻、輪胎）不變
+function tintedLayer(name, color) {
+  const key = name + color, hit = BL.tint.get(key); if (hit) return hit;
+  const im = BL.img[name], mask = BL.img[name + '_mask'];
+  if (!im) return null;
+  if (!mask || !color) { BL.tint.set(key, im); return im; }
+  // 遮罩是黑白的：亮度轉成透明度（白＝烤漆）
+  const t = mkCanvas(im.width, im.height), tg = t.getContext('2d');
+  tg.drawImage(mask, 0, 0);
+  const d = tg.getImageData(0, 0, t.width, t.height); for (let i = 0; i < d.data.length; i += 4) { d.data[i + 3] = d.data[i + 3] * d.data[i] / 255; } tg.putImageData(d, 0, 0);
+  const out = mkCanvas(im.width, im.height), og = out.getContext('2d');
+  og.drawImage(im, 0, 0);
+  const col = mkCanvas(im.width, im.height), cg = col.getContext('2d');
+  cg.drawImage(im, 0, 0); cg.globalCompositeOperation = 'multiply'; cg.fillStyle = color; cg.fillRect(0, 0, col.width, col.height);
+  cg.globalCompositeOperation = 'destination-in'; cg.drawImage(t, 0, 0);
+  og.drawImage(col, 0, 0);
+  if (BL.tint.size > 24) BL.tint.delete(BL.tint.keys().next().value);
+  BL.tint.set(key, out); return out;
+}
+function renderTruckBL(braking, scale) {
+  const cfg = truckCfg(), s = K * DPR * scale, L = BL.layout;
+  if (truckCv.width !== Math.round(TC.w * s) || truckCv.height !== Math.round(TC.h * s)) { truckCv = mkCanvas(TC.w * s, TC.h * s); tcx = truckCv.getContext('2d'); }
+  const g = tcx; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, truckCv.width, truckCv.height); g.setTransform(s, 0, 0, s, 0, 0);
+  const [fx, fy, fw, fh] = L.frame, ty = -truck.susT, ry = -truck.susR;
+  const layer = (n, dy, color) => { const im = color ? tintedLayer(n, color) : BL.img[n]; if (im) g.drawImage(im, fx, fy + dy, fw, fh); };
+  const wr = L.wheelR, wy = 300 - wr / 1.04;
+  const wheel = (x) => { const im = BL.img.wheel; if (!im) return; g.save(); g.translate(x, wy); g.rotate(truck.wheelA); g.drawImage(im, -wr, -wr, wr * 2, wr * 2); g.restore(); };
+  // 拖車（自己的懸吊）＋拖車輪
+  layer('trailer', ry, cfg.trailerColor);
+  for (const x of L.axlesTrailer) wheel(x);
+  // 車頭底盤（大樑、油箱、擋泥板）
+  layer('tractor', ty);
+  if (cfg.skirts === 'on') layer('kit_skirts', ty, cfg.cabColor);
+  // 司機在車窗後面（車窗是半透明的）
+  const [wx, wyy, ww, wh] = L.window;
+  g.save(); g.translate(0, ty); g.beginPath(); g.rect(wx, wyy, ww, wh); g.clip();
+  const bob = Math.sin(worldT * 2.2) * 0.6;
+  if (!driverAnim.draw(g, wx + ww * 0.18, wyy + wh * 0.12 + bob, ww * 0.7, wh)) {
+    const cx = wx + ww * 0.45, cy = wyy + wh * 0.45 + bob, r = wh * 0.16;
+    g.fillStyle = '#2b3542'; g.beginPath(); g.ellipse(cx, wyy + wh + bob, r * 2.2, r * 1.6, 0, Math.PI, 0); g.fill();
+    g.fillStyle = '#d9a777'; g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#1e1a18'; g.beginPath(); g.arc(cx, cy - r * 0.35, r * 1.05, Math.PI, Math.PI * 2); g.fill();
+    g.fillStyle = '#c0392b'; g.fillRect(cx - r * 1.1, cy - r * 0.95, r * 2.3, r * 0.35);
+  }
+  g.restore();
+  // 駕駛室（跟著加速、煞車點頭）＋改裝零件
+  const [px, py] = L.cabPivot;
+  g.save(); g.translate(0, ty); g.translate(px, py); g.rotate(truck.pitch); g.translate(-px, -py);
+  layer('cab', 0, cfg.cabColor);
+  if (cfg.bumper === 'chromeb') layer('kit_bumper_chromeb', 0);
+  if (cfg.bumper === 'bull') layer('kit_bumper_bull', 0);
+  if (cfg.spoiler === 'on') layer('kit_spoiler', 0, cfg.cabColor);
+  if (cfg.visor === 'on') layer('kit_visor', 0, cfg.cabColor);
+  if (cfg.lightbar === 'on') layer('kit_lightbar', 0);
+  if (cfg.stacks === 'on') layer('kit_stacks', 0);
+  g.restore();
+  for (const x of L.axlesTractor) wheel(x);
+  return { headX: L.head[0], headY: L.head[1] + ty, tailX: L.tail[0], tailY: L.tail[1] + ry, stackTop: cfg.stacks === 'on' ? { x: L.stack[0], y: L.stack[1] + ty } : { x: L.exhaust[0], y: L.exhaust[1] + ty }, axles: [...L.axlesTrailer, ...L.axlesTractor] };
+}
 function renderTruck(braking, scale = 1.18) {
+  if (BL.ready) return renderTruckBL(braking, scale);
   const cfg = truckCfg(), s = K * DPR * scale;
   if (truckCv.width !== Math.round(TC.w * s) || truckCv.height !== Math.round(TC.h * s)) { truckCv = mkCanvas(TC.w * s, TC.h * s); tcx = truckCv.getContext('2d'); }
   const g = tcx; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, truckCv.width, truckCv.height); g.setTransform(s, 0, 0, s, 0, 0);
@@ -425,7 +499,7 @@ function renderTruck(braking, scale = 1.18) {
   // 5. 輪子（最上層，會轉）
   for (const ax of axR) drawWheel(g, ax, gy, R, truck.wheelA, cfg);
   for (const ax of axT) drawWheel(g, ax, gy, R, truck.wheelA, cfg);
-  return { headY: 202 + ty, tailY: 207 + ry, stackTop: cfg.stacks === 'on' ? { x: 544, y: 24 + ty } : { x: 520, y: 246 + ty } };
+  return { headX: 712, tailX: 12, axles: [70, 132, 500, 556, 652], headY: 202 + ty, tailY: 207 + ry, stackTop: cfg.stacks === 'on' ? { x: 544, y: 24 + ty } : { x: 520, y: 246 + ty } };
 }
 
 // ---------------- 粒子：廢氣、雨、雪 ----------------
@@ -744,7 +818,7 @@ function drawRoad(dt, braking) {
     ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(tx + cx * TK, ty + 298 * TK, rx * TK, 16 * TK, 0, 0, Math.PI * 2); ctx.fill();
   }
   // 接觸陰影：每顆輪子貼地的地方一小塊很深的影子（車子才不會像浮著）
-  for (const ax of [70, 132, 500, 556, 652]) {
+  for (const ax of info.axles) {
     const cxw = tx + ax * TK, cyw = ty + 300 * TK, cg2 = ctx.createRadialGradient(cxw, cyw, 1, cxw, cyw, 30 * TK);
     cg2.addColorStop(0, 'rgba(0,0,0,0.7)'); cg2.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = cg2; ctx.beginPath(); ctx.ellipse(cxw, cyw, 32 * TK, 6 * TK, 0, 0, Math.PI * 2); ctx.fill();
@@ -773,7 +847,7 @@ function drawRoad(dt, braking) {
   // 光線（Blend：lighter／screen）：頭燈錐形光束、煞車燈光暈
   ctx.globalCompositeOperation = 'lighter';
   if (st.lights) {
-    const hx = tx + 712 * TK, hy = ty + info.headY * TK;
+    const hx = tx + info.headX * TK, hy = ty + info.headY * TK;
     const beam = ctx.createLinearGradient(hx, hy, hx + 520 * K, hy);
     beam.addColorStop(0, 'rgba(255,245,215,0.55)'); beam.addColorStop(1, 'rgba(255,245,215,0)');
     ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(hx, hy - 4 * K); ctx.lineTo(hx + 520 * K, hy - 70 * K); ctx.lineTo(hx + 520 * K, hy + 110 * K); ctx.lineTo(hx, hy + 6 * K); ctx.fill();
@@ -785,7 +859,7 @@ function drawRoad(dt, braking) {
   }
   const tailOn = braking || st.lights;
   if (tailOn) {
-    const lx = tx + 12 * TK, ly = ty + info.tailY * TK, r = (braking ? 70 : 30) * K;
+    const lx = tx + info.tailX * TK, ly = ty + info.tailY * TK, r = (braking ? 70 : 30) * K;
     const tg = ctx.createRadialGradient(lx, ly, 1, lx, ly, r); tg.addColorStop(0, `rgba(255,40,30,${braking ? 0.9 : 0.5})`); tg.addColorStop(1, 'rgba(255,40,30,0)');
     ctx.fillStyle = tg; ctx.beginPath(); ctx.arc(lx, ly, r, 0, Math.PI * 2); ctx.fill();
     if (st.weather === 'rain' || braking) { const rf = ctx.createLinearGradient(lx, ty + 298 * TK, lx, ty + 360 * TK); rf.addColorStop(0, `rgba(255,40,30,${braking ? 0.35 : 0.15})`); rf.addColorStop(1, 'rgba(255,40,30,0)'); ctx.fillStyle = rf; ctx.fillRect(lx - 16 * K, ty + 298 * TK, 32 * K, 60 * K); }
@@ -793,7 +867,7 @@ function drawRoad(dt, braking) {
   ctx.globalCompositeOperation = 'source-over';
   // 微塵：只在頭燈、路燈光束裡亮起來
   const beams = [];
-  if (st.lights) { const hx = tx + 712 * TK, hy = ty + info.headY * TK; beams.push((x, y) => x > hx && x < hx + 520 * K && Math.abs(y - hy - 20 * K) < 20 * K + (x - hx) * 0.17); }
+  if (st.lights) { const hx = tx + info.headX * TK, hy = ty + info.headY * TK; beams.push((x, y) => x > hx && x < hx + 520 * K && Math.abs(y - hy - 20 * K) < 20 * K + (x - hx) * 0.17); }
   if (st.time !== 'day' || st.weather !== 'clear') for (const lxp of lampXs(camX)) { const lx = lxp + 47 * K; beams.push((x, y) => y > 278 * K && y < 640 * K && Math.abs(x - lx) < 10 * K + (y - 278 * K) * 0.28); }
   drawDust(dt, beams);
   // 天氣粒子
