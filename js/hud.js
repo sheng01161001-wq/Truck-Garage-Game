@@ -2,53 +2,10 @@
 import { ROADS, ROAD_W, DEPOTS, GAS, GARAGE_BLD, DISTRICTS } from './world.js';
 import { clamp, roundRectPath } from './util.js';
 import { PTS as HW_PTS, hwProject, inCity, LEN as HW_LEN, CITY_SIZE } from './highway.js';
+import { netRoute } from './roadnet.js';
+import { STRUCTS } from './elevated.js';
 
-// ---------- 導航：沿著道路找最短路 ----------
-function nearestRoadPoint(x, z) {
-  let best = null;
-  for (const r of ROADS) {
-    const a = { x: r, z: clamp(z, -CITY_SIZE, CITY_SIZE), axis: 'z', line: r, s: clamp(z, -CITY_SIZE, CITY_SIZE) };
-    const b = { x: clamp(x, -CITY_SIZE, CITY_SIZE), z: r, axis: 'x', line: r, s: clamp(x, -CITY_SIZE, CITY_SIZE) };
-    for (const p of [a, b]) { const d = Math.hypot(p.x - x, p.z - z); if (!best || d < best.d) best = { ...p, d }; }
-  }
-  return best;
-}
-const key = (x, z) => x + ',' + z;
-function gridRoute(from, to) {
-  const A = nearestRoadPoint(from.x, from.z), B = nearestRoadPoint(to.x, to.z);
-  const nodes = new Map(), edges = new Map();
-  const addNode = (id, x, z) => { if (!nodes.has(id)) { nodes.set(id, { x, z }); edges.set(id, []); } };
-  const link = (a, b) => { const p = nodes.get(a), q = nodes.get(b), d = Math.hypot(p.x - q.x, p.z - q.z); edges.get(a).push([b, d]); edges.get(b).push([a, d]); };
-  for (const x of ROADS) for (const z of ROADS) addNode(key(x, z), x, z);
-  for (const line of ROADS) for (let i = 0; i < ROADS.length - 1; i++) {
-    link(key(line, ROADS[i]), key(line, ROADS[i + 1]));
-    link(key(ROADS[i], line), key(ROADS[i + 1], line));
-  }
-  const attach = (id, p) => {
-    addNode(id, p.x, p.z);
-    const lo = [...ROADS].reverse().find((r) => r <= p.s), hi = ROADS.find((r) => r >= p.s);
-    const nodeAt = (s) => (p.axis === 'z' ? key(p.line, s) : key(s, p.line));
-    if (lo !== undefined) link(id, nodeAt(lo));
-    if (hi !== undefined && hi !== lo) link(id, nodeAt(hi));
-    return { lo, hi };
-  };
-  const sa = attach('S', A), sb = attach('G', B);
-  if (A.axis === B.axis && A.line === B.line && sa.lo === sb.lo && sa.hi === sb.hi) link('S', 'G');
-  // Dijkstra
-  const dist = new Map([['S', 0]]), prev = new Map(), done = new Set();
-  while (true) {
-    let u = null, ud = Infinity;
-    for (const [id, d] of dist) if (!done.has(id) && d < ud) { u = id; ud = d; }
-    if (u === null || u === 'G') break;
-    done.add(u);
-    for (const [v, w] of edges.get(u)) { const nd = ud + w; if (nd < (dist.get(v) ?? Infinity)) { dist.set(v, nd); prev.set(v, u); } }
-  }
-  const path = [];
-  let cur = 'G';
-  while (cur) { path.unshift(nodes.get(cur)); cur = prev.get(cur); if (cur === undefined) break; }
-  const pts = [{ x: from.x, z: from.z }, ...path, { x: to.x, z: to.z }];
-  return pts;
-}
+// ---------- 導航：地面道路＋高架／匝道（js/roadnet.js）----------
 // 國道上從 s0 走到 s1 的點（每 12 公尺一點）
 function hwSlice(s0, s1) {
   const out = [], a = clamp(s0, 0, HW_LEN), b = clamp(s1, 0, HW_LEN), step = a < b ? 12 : -12;
@@ -59,13 +16,13 @@ function hwSlice(s0, s1) {
 export function computeRoute(from, to) {
   const fOut = !inCity(from.x, from.z), tOut = !inCity(to.x, to.z);
   let pts;
-  if (!fOut && !tOut) pts = gridRoute(from, to);
+  if (!fOut && !tOut) pts = netRoute(from, to);
   else {
     const fs = fOut ? hwProject(from.x, from.z).s : 0, ts = tOut ? hwProject(to.x, to.z).s : 0;
     const gate = HW_PTS[0];
     if (fOut && tOut) pts = [{ x: from.x, z: from.z }, ...hwSlice(fs, ts), { x: to.x, z: to.z }];
-    else if (fOut) pts = [{ x: from.x, z: from.z }, ...hwSlice(fs, 0), ...gridRoute({ x: gate.x, z: gate.z }, to)];
-    else pts = [...gridRoute(from, { x: gate.x, z: gate.z }), ...hwSlice(0, ts), { x: to.x, z: to.z }];
+    else if (fOut) pts = [{ x: from.x, z: from.z }, ...hwSlice(fs, 0), ...netRoute({ x: gate.x, z: gate.z, y: 0 }, to)];
+    else pts = [...netRoute(from, { x: gate.x, z: gate.z, y: 0 }), ...hwSlice(0, ts), { x: to.x, z: to.z }];
   }
   let len = 0; for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
   return { pts, len };
@@ -92,16 +49,10 @@ export function drawMinimap(cv, st) {
   }
   ctx.strokeStyle = st.night ? '#4a5866' : '#8e979f'; ctx.lineWidth = ROAD_W; ctx.lineCap = 'butt';
   for (const r of ROADS) { ctx.beginPath(); ctx.moveTo(r, -CITY_SIZE); ctx.lineTo(r, CITY_SIZE); ctx.moveTo(-CITY_SIZE, r); ctx.lineTo(CITY_SIZE, r); ctx.stroke(); }
-  // Q：四象限環狀交流道主線與四條匝道，同步呈現在 GPS。
-  ctx.save(); ctx.strokeStyle = st.night ? '#b8c8d8' : '#dce4eb'; ctx.lineWidth = ROAD_W * 0.72;
-  ctx.beginPath(); ctx.moveTo(240,100); ctx.lineTo(240,380); ctx.stroke();
-  ctx.setLineDash([7,5]); ctx.lineWidth = 7;
-  ctx.beginPath();
-  ctx.moveTo(330,234); ctx.bezierCurveTo(330,180,285,145,240,145);
-  ctx.moveTo(330,246); ctx.bezierCurveTo(330,300,285,335,240,335);
-  ctx.moveTo(150,234); ctx.bezierCurveTo(150,180,195,175,240,175);
-  ctx.moveTo(150,246); ctx.bezierCurveTo(150,300,195,305,240,305);
-  ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+  // 高架橋、匝道、環道（淺色、比地面路亮一點）
+  ctx.save(); ctx.strokeStyle = st.night ? '#b8c8d8' : '#dce4eb'; ctx.lineJoin = 'round';
+  for (const S of STRUCTS) { ctx.lineWidth = S.hw * 1.6; ctx.beginPath(); S.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z))); ctx.stroke(); }
+  ctx.restore();
   ctx.lineJoin = 'round'; ctx.beginPath(); HW_PTS.forEach((p, i) => (i ? ctx.lineTo(p.x, p.z) : ctx.moveTo(p.x, p.z))); ctx.stroke();
   for (const p of HW_PTS) if (p.w > 7.5) { ctx.lineWidth = p.w * 2; ctx.beginPath(); ctx.moveTo(p.x - p.fx * 2.2, p.z - p.fz * 2.2); ctx.lineTo(p.x + p.fx * 2.2, p.z + p.fz * 2.2); ctx.stroke(); }
   ctx.strokeStyle = st.night ? '#2a3038' : '#5d646b'; ctx.lineWidth = ROAD_W * 0.9;

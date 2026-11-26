@@ -1,4 +1,4 @@
-// 卡車改裝王 v21（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v22（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v21';
+const VERSION = 'v22';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -782,11 +782,14 @@ function rigPoints(x, z, h, th) {
 }
 function hitTest(x, z, h, th) {
   const cars = traffic.circles(), up = S.y > 2.5; // 在高架橋上：不會撞到橋下的車和東西
-  for (const p of rigPoints(x, z, h, th)) {
+  const rp = rigPoints(x, z, h, th);
+  for (let k = 0; k < rp.length; k++) {
+    const p = rp[k];
     const out = Math.abs(p.x) > WORLD - p.r || Math.abs(p.z) > WORLD - p.r;
     if ((out || !inCity(p.x, p.z)) && hwBlocked(p.x, p.z, p.r)) return { wall: true }; // 城外只能走國道（市區邊緣外那一圈也一樣）
-    if (!out && inCity(p.x, p.z) && Math.abs(groundAt(p.x, p.z, S.y) - S.y) > 2.5) return { wall: true }; // 橋邊有護欄，不會掉下去
+    if (k < 3 && !out && inCity(p.x, p.z) && Math.abs(groundAt(p.x, p.z, S.y) - S.y) > 2.5) return { wall: true }; // 橋邊有護欄，不會掉下去（拖車尾巴轉彎時會稍微超出橋面，不算）
     if (!out && !up) for (const b of boxes) {
+      if (b.top !== undefined && S.y > b.top - 2.5) continue; // 橋墩：開在橋面上的車不會撞到下面的橋墩
       const cx = clamp(p.x, b.minx, b.maxx), cz = clamp(p.z, b.minz, b.maxz);
       if ((p.x - cx) ** 2 + (p.z - cz) ** 2 < p.r * p.r) return { wall: true };
     }
@@ -803,7 +806,7 @@ function drive(dt) {
   const loadGrip = clamp(1 - tons * 0.0035, 0.88, 1);
   const grip = (surf === 'road' ? 1 : surf === 'gravel' ? 0.72 : 0.78) * (wet ? 0.78 : 1) * loadGrip;
   const crr = surf === 'road' ? 0.008 : surf === 'gravel' ? 0.042 : 0.028;
-  S.speedLimit = speedLimitAt(S.x, S.z);
+  S.speedLimit = speedLimitAt(S.x, S.z, S.y);
   // 油門、煞車慢慢踩下去
   S.thr += ((input.up ? 1 : 0) - S.thr) * Math.min(1, dt * 4);
   const brkIn = input.down ? 1 : 0;
@@ -886,8 +889,8 @@ function drive(dt) {
     const fx = Math.sin(S.heading), fz = Math.cos(S.heading);
     const y0 = S.y;
     S.y = groundAt(S.x, S.z, y0);
-    S.grade = (groundAt(S.x + fx * L, S.z + fz * L, S.y) - S.y) / L;
-    S.yA = groundAt(S.x - Math.sin(S.trailerHeading) * LT, S.z - Math.cos(S.trailerHeading) * LT, S.y);
+    S.grade = (groundAt(S.x + fx * L, S.z + fz * L, S.y, 1.5) - S.y) / L;
+    S.yA = clamp(groundAt(S.x - Math.sin(S.trailerHeading) * LT, S.z - Math.cos(S.trailerHeading) * LT, S.y, 1.8), S.y - 1.8, S.y + 1.8); // 拖車尾巴超出橋面時不要往下栽
     S.tunNear = nearTunnel(S.x, S.z);
     tollCheck(S.x + fx * 4, S.z + fz * 4, fx, fz);
   }
@@ -1039,7 +1042,7 @@ function updateHud(dt) {
   if (m) {
     S.routeT -= 1 / 30;
     const d = missionTarget();
-    if (!S.route || S.routeT <= 0) { S.route = computeRoute({ x: S.x, z: S.z }, d); S.routeT = 0.5; }
+    if (!S.route || S.routeT <= 0) { S.route = computeRoute({ x: S.x, z: S.z, y: S.y, heading: S.heading }, d); S.routeT = 0.5; }
     const km = S.route.len >= 1000 ? (S.route.len / 1000).toFixed(1) + ' 公里' : Math.round(S.route.len) + ' 公尺';
     // 下一個轉彎方向
     const nxt = S.route.pts.find((p, i) => i > 0 && Math.hypot(p.x - S.x, p.z - S.z) > 14) || d;

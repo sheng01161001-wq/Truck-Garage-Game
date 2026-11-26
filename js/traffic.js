@@ -44,7 +44,105 @@ function shared() {
   return SH;
 }
 
-function makeCar(type, colorIdx) {
+// ---------- 真實車款模型（Kenney Car Kit，CC0，models/cars/）----------
+// 先用方塊車出場，模型載完再換上；載不到（離線）就一直用方塊車。
+const MODEL_SETS = {
+  sedan: ['sedan', 'sedan-sports', 'hatchback-sports', 'taxi', 'police'],
+  suv: ['suv', 'suv-luxury', 'truck'],
+  van: ['van', 'ambulance'],
+  lorry: ['delivery', 'garbage-truck', 'firetruck'],
+};
+// 各車種的目標大小（寬、高、長，公尺）：模型是玩具比例，照這個拉成真實比例
+const MODEL_SIZE = { sedan: [1.85, 1.5, 4.5], suv: [1.95, 1.8, 4.7], van: [2.0, 2.2, 5.2], lorry: [2.4, 3.3, 8.8] };
+const MODEL_CACHE = new Map();   // 檔名 → Promise<{ scene, box }>
+let PALETTE = null;              // 每台車都用同一張調色盤貼圖，只留一份
+function loadModel(name) {
+  if (!MODEL_CACHE.has(name)) {
+    MODEL_CACHE.set(name, import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => new GLTFLoader().loadAsync(`models/cars/${name}.glb`)).then((gl) => {
+      const scene = gl.scene;
+      scene.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true; o.receiveShadow = true;
+        const m = o.material;
+        if (m.map) {
+          if (!PALETTE) {
+            // 調色盤貼圖：用最近點取樣，色塊邊緣才不會糊
+            PALETTE = m.map; PALETTE.magFilter = THREE.NearestFilter; PALETTE.minFilter = THREE.NearestFilter; PALETTE.generateMipmaps = false; PALETTE.needsUpdate = true;
+          } else if (m.map !== PALETTE) { m.map.dispose(); m.map = PALETTE; }
+        }
+      });
+      return { scene, box: new THREE.Box3().setFromObject(scene) };
+    }));
+  }
+  return MODEL_CACHE.get(name);
+}
+// 真實質感：模型原本是卡通調色盤，用顯示卡依顏色分辨「烤漆／車窗／其他」——
+// 烤漆換成真實車色（白、銀、黑、深藍…）並加亮光清漆；車窗變深色玻璃；輪胎、飾條變霧面。
+// 警車、計程車、救護車、消防車、垃圾車保留原本塗裝，只換質感。
+const SPECIAL = new Set(['police', 'taxi', 'ambulance', 'firetruck', 'garbage-truck']);
+const CAR_MATS = new Map();   // 'special' 或 顏色編號 → 材質
+function carMaterial(colorIdx, special) {
+  const key = special ? 'special' : colorIdx % COLORS.length;
+  if (CAR_MATS.has(key)) return CAR_MATS.get(key);
+  const m = new THREE.MeshPhysicalMaterial({ map: PALETTE, roughness: 0.8, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.06 });
+  const uPaint = { value: new THREE.Color(special ? '#ffffff' : COLORS[key]) }, uRecolor = { value: special ? 0 : 1 };
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uPaint = uPaint; sh.uniforms.uRecolor = uRecolor;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('void main() {', `uniform vec3 uPaint;
+uniform float uRecolor;
+float gBody = 0.0;
+float gGlass = 0.0;
+void main() {`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        {
+          vec3 tc = diffuseColor.rgb;
+          float mx = max(tc.r, max(tc.g, tc.b)), mn = min(tc.r, min(tc.g, tc.b));
+          // 車窗：偏藍的灰（r≈g、b 稍大、不亮）
+          gGlass = step(abs(tc.r - tc.g), 0.02) * step(tc.r * 1.25, tc.b) * step(tc.b - tc.r, 0.15) * step(mx, 0.35);
+          // 烤漆：顏色鮮艷的地方
+          gBody = step(0.18, mx - mn) * (1.0 - gGlass);
+          float shade = clamp(mx / 0.65, 0.55, 1.25);
+          diffuseColor.rgb = mix(tc, uPaint * shade, gBody * uRecolor);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.012, 0.016, 0.022), gGlass);
+        }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+ roughnessFactor = mix(roughnessFactor, 0.3, gBody);
+ roughnessFactor = mix(roughnessFactor, 0.05, gGlass);`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+ metalnessFactor = mix(metalnessFactor, 0.45, gBody * uRecolor);
+ metalnessFactor = mix(metalnessFactor, 0.1, gGlass);`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+ material.clearcoat *= max(gBody, gGlass);`);
+  };
+  m.customProgramCacheKey = () => 'kenney-car-v1';
+  CAR_MATS.set(key, m);
+  return m;
+}
+
+function upgradeCar(g, type, pick, keep, colorIdx) {
+  const list = MODEL_SETS[type];
+  if (!list) return;
+  const name = list[pick % list.length];
+  loadModel(name).then(({ scene, box }) => {
+    const [W, H, L] = MODEL_SIZE[type];
+    const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+    const sx = W / size.x, sy = H / size.y, sz = L / size.z;
+    const m = scene.clone(true);
+    m.scale.set(sx, sy, sz);
+    const mat = carMaterial(colorIdx, SPECIAL.has(name));
+    m.traverse((o) => { if (o.isMesh) o.material = mat; });
+    // 底部貼地、左右前後置中（跟碰撞長度 len 對齊）
+    m.position.set(-c.x * sx, -box.min.y * sy, -c.z * sz);
+    // 拿掉方塊車（車燈留著，晚上才會亮），車燈高度改成新車身的高度
+    for (const ch of [...g.children]) if (!keep.has(ch)) g.remove(ch);
+    for (const lamp of keep) lamp.position.y = H * (type === 'lorry' ? 0.3 : 0.4);
+    g.add(m);
+    g.userData.model = name;
+  }).catch((e) => console.warn('車輛模型載入失敗，繼續用方塊車：', name, e));
+}
+
+export function makeCar(type, colorIdx, pick = colorIdx, upgrade = true) {
   const s = shared(), g = new THREE.Group(), paint = s.paints[colorIdx % s.paints.length];
   const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m); return m; };
   let len = 4.5;
@@ -56,11 +154,13 @@ function makeCar(type, colorIdx) {
     add(s.geo.lorryBox, s.box, 0, 2.05, -1.0);
   }
   else { add(s.geo.vanBody, paint, 0, 1.25, 0); add(s.geo.vanWin, s.glass, 0, 1.75, 2.58); len = 5.2; }
+  const keep = new Set();
   for (const sx of [1, -1]) {
     for (const sz of [1, -1]) { add(s.wheel, s.tire, sx * 0.82, 0.33, sz * (len / 2 - 0.9)); add(s.hubG, s.hub, sx * 0.83, 0.33, sz * (len / 2 - 0.9)); }
-    add(s.geo.lamp, s.head, sx * (type === 'lorry' ? 0.8 : 0.6), type === 'van' || type === 'lorry' ? 0.9 : 0.8, len / 2 + 0.01);
-    add(s.geo.lamp, s.tail, sx * (type === 'lorry' ? 0.95 : 0.62), type === 'van' || type === 'lorry' ? 1.0 : 0.85, -len / 2 - 0.01);
+    keep.add(add(s.geo.lamp, s.head, sx * (type === 'lorry' ? 0.8 : 0.6), type === 'van' || type === 'lorry' ? 0.9 : 0.8, len / 2 + 0.01));
+    keep.add(add(s.geo.lamp, s.tail, sx * (type === 'lorry' ? 0.95 : 0.62), type === 'van' || type === 'lorry' ? 1.0 : 0.85, -len / 2 - 0.01));
   }
+  if (upgrade) upgradeCar(g, type, pick, keep, colorIdx);
   return { g, len };
 }
 

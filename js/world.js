@@ -4,9 +4,10 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng, makeNoise, clamp, canvasTex, FONT } from './util.js';
 import {
-  asphaltTex, noiseBumpTex, concreteTex, grassTex, facadeTex, corrugatedTex, boardTex, gravelTex, fieldTex, stripeTex, ledTex,
+  asphaltTex, noiseBumpTex, concreteTex, grassTex, facadeTex, photoMap, photoDetail, corrugatedTex, boardTex, gravelTex, fieldTex, stripeTex, ledTex,
 } from './textures.js';
 import { naturalHeight, terrainHeight, buildHighway, LUMBER, nearHighway, inCity, isInterchangeRoad, PIERS } from './highway.js';
+import { nearStruct, buildElevated } from './elevated.js';
 
 export const ROADS = [-400, -240, -80, 80, 240, 400];
 export const ROAD_W = 14;
@@ -133,6 +134,8 @@ export function buildWorld(scene, quality) {
   // 地面草地（遊戲區）
   const gt = grassTex(); gt.repeat.set(70, 70);
   const groundMat = stdMat({ map: gt, roughness: 0.95 });
+  // 實拍草地的凹凸細節（照片偏乾黃，所以顏色仍用程式畫的綠草，只借照片的立體感；照片 15 公尺見方 → 重複 72 次）
+  photoDetail(groundMat, 'aerial_grass_rock', 72, 72, 0.6);
   wetMats.push({ mat: groundMat, dry: 0.95, wet: 0.6, dryColor: new THREE.Color(1, 1, 1), wetColor: new THREE.Color(0.75, 0.78, 0.75) });
   const ground = mesh(new THREE.PlaneGeometry(1080, 1080), groundMat, 0, 0, 0, root, { cast: false }); ground.rotation.x = -Math.PI / 2;
 
@@ -167,6 +170,7 @@ export function buildWorld(scene, quality) {
   for (const kind of ['city', 'highway', 'plain']) {
     const t = asphaltTex(kind);
     const m = stdMat({ map: t, bumpMap: bump, bumpScale: 1.2, roughness: 0.88 });
+    photoDetail(m, 'asphalt_02', 14 / 3, 28 / 3, 0.8);   // 實拍柏油的凹凸（照片 3 公尺見方）
     wetMats.push({ mat: m, dry: 0.88, wet: 0.12, dryColor: new THREE.Color(1, 1, 1), wetColor: new THREE.Color(0.55, 0.56, 0.6) });
     roadMat[kind] = m;
   }
@@ -207,6 +211,7 @@ export function buildWorld(scene, quality) {
 
   // 人行道（市區道路兩側）
   const sideMat = stdMat({ map: concreteTex(), roughness: 0.9 }); sideMat.map.repeat.set(1, 8);
+  photoMap(sideMat, 'concrete_pavement', 1.7, 14);   // 實拍人行道鋪面（照片 1.8 公尺見方）
   wetMats.push({ mat: sideMat, dry: 0.9, wet: 0.35, dryColor: new THREE.Color(1, 1, 1), wetColor: new THREE.Color(0.7, 0.7, 0.72) });
   for (const line of [-80, 80]) for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i] + (ROADS.includes(stops[i]) ? ROAD_W / 2 + 3 : 0), b = stops[i + 1] - (ROADS.includes(stops[i + 1]) ? ROAD_W / 2 + 3 : 0);
@@ -226,6 +231,7 @@ export function buildWorld(scene, quality) {
     if (Math.abs(x) + sx / 2 > 452 || Math.abs(z) + sz / 2 > 452) return false;
     if (ROADS.some((r) => Math.abs(x - r) < sx / 2 + ROAD_W / 2 + 5 || Math.abs(z - r) < sz / 2 + ROAD_W / 2 + 5)) return false;
     if (keepAway.some(([kx, kz, d]) => Math.hypot(x - kx, z - kz) < d + Math.max(sx, sz) / 2)) return false;
+    if (nearStruct(x, z, Math.hypot(sx, sz) / 2 + 3)) return false; // 高架橋、匝道底下不蓋房子
     return !boxes.some((b) => x + sx / 2 + margin > b.minx && x - sx / 2 - margin < b.maxx && z + sz / 2 + margin > b.minz && z - sz / 2 - margin < b.maxz);
   };
   const addBox = (x, z, sx, sz) => boxes.push({ minx: x - sx / 2, maxx: x + sx / 2, minz: z - sz / 2, maxz: z + sz / 2 });
@@ -421,6 +427,7 @@ export function buildWorld(scene, quality) {
       const x = (R() * 2 - 1) * area, z = (R() * 2 - 1) * area, h = heightAt(x, z);
       if (h < minH || h > maxH) continue;
       if (nearHighway(x, z)) continue;
+      if (nearStruct(x, z, 2.5)) continue; // 樹不要長在高架和匝道上
       if (Math.max(Math.abs(x), Math.abs(z)) < 465) {
         if (ROADS.some((r) => Math.abs(x - r) < 12 || Math.abs(z - r) < 12)) continue;
         if (keepAway.some(([kx, kz, d]) => Math.hypot(x - kx, z - kz) < d * 0.7)) continue;
@@ -446,7 +453,13 @@ export function buildWorld(scene, quality) {
     wet: (mat, dry, wet, wetColor) => wetMats.push({ mat, dry, wet, dryColor: mat.color.clone(), wetColor }),
     night: (mat, on) => nightMats.push({ mat, on }),
   });
-  for (const p of PIERS) if (inCity(p.x, p.z)) boxes.push({ minx: p.x - p.sx / 2, maxx: p.x + p.sx / 2, minz: p.z - p.sz / 2, maxz: p.z + p.sz / 2 });
+  // v22：東門環狀交流道（國道入口）
+  buildElevated(root, {
+    stdMat, onRoad, piers: PIERS,
+    wet: (mat, dry, wet, wetColor) => wetMats.push({ mat, dry, wet, dryColor: mat.color.clone(), wetColor }),
+    night: (mat, on) => nightMats.push({ mat, on }),
+  });
+  for (const p of PIERS) if (inCity(p.x, p.z)) boxes.push({ minx: p.x - p.sx / 2, maxx: p.x + p.sx / 2, minz: p.z - p.sz / 2, maxz: p.z + p.sz / 2, top: p.top ?? 7 }); // top＝橋面高度：在橋上的車不會撞到
 
   // ---------- 路燈 ----------
   for (const line of ROADS) {
@@ -460,6 +473,8 @@ export function buildWorld(scene, quality) {
       lampSpots.push({ x: a, z: line + side * off, ry: side > 0 ? Math.PI : 0 });
     }
   }
+  // 市區路燈不要立在高架橋下、匝道上（路燈有 9 公尺高會穿過橋面）
+  for (let i = lampSpots.length - 1; i >= 0; i--) { const l = lampSpots[i]; if (l.y === undefined && nearStruct(l.x, l.z, 2.5)) lampSpots.splice(i, 1); }
   const poleG = new THREE.CylinderGeometry(0.12, 0.18, 9, 8).translate(0, 4.5, 0);
   const armG = new THREE.BoxGeometry(0.12, 0.12, 2.6).translate(0, 8.9, 1.2);
   const headG = new THREE.BoxGeometry(0.5, 0.18, 0.9).translate(0, 8.82, 2.4);
@@ -536,8 +551,37 @@ export function buildWorld(scene, quality) {
     const red = stdMat({ color: 0xb71c1c, roughness: 0.35, metalness: 0.4 });
     for (let i = 0; i < 4; i++) mesh(new RoundedBoxGeometry(2, 1.8, 0.8, 2, 0.05), red, -12 + i * 2.2, 0.9, -23.2, g);
     const tireM = stdMat({ color: 0x151515, roughness: 0.9 });
-    for (let k = 0; k < 4; k++) mesh(new THREE.TorusGeometry(0.42, 0.18, 10, 24).rotateX(Math.PI / 2), tireM, 13, 0.2 + k * 0.36, -20, g);
-    for (let k = 0; k < 3; k++) mesh(new THREE.TorusGeometry(0.42, 0.18, 10, 24).rotateX(Math.PI / 2), tireM, 14.2, 0.2 + k * 0.36, -18.6, g);
+    const torusTires = [];
+    for (let k = 0; k < 4; k++) torusTires.push(mesh(new THREE.TorusGeometry(0.42, 0.18, 10, 24).rotateX(Math.PI / 2), tireM, 13, 0.2 + k * 0.36, -20, g));
+    for (let k = 0; k < 3; k++) torusTires.push(mesh(new THREE.TorusGeometry(0.42, 0.18, 10, 24).rotateX(Math.PI / 2), tireM, 14.2, 0.2 + k * 0.36, -18.6, g));
+    // 實拍道具（Poly Haven，CC0，models/props/）：背景載入，載不到就維持原樣
+    // [檔名, x, z, 轉向, 放在多高, 放大倍數, 平放（輪胎）]
+    const PROPS = [
+      ['metal_toolbox', -11.6, -23.0, 0.2, 1.8, 1.6], ['metal_toolbox', -7.2, -23.0, -0.15, 1.8, 1.6],
+      ['portable_welding_cart', -15.3, -16.5, 0.6, 0, 1],
+      ['Barrel_01', 15.6, 9.5, 0, 0, 1.15], ['Barrel_01', 15.7, 10.9, 1, 0, 1.15], ['Barrel_01', 14.5, 10.2, 2, 0, 1.15],
+      ['plastic_crate_01', -15.6, 12.0, 0, 0, 1.6], ['plastic_crate_01', -15.6, 12.7, 0.1, 0, 1.6], ['plastic_crate_01', -15.6, 12.35, -0.1, 0.42, 1.6],
+    ];
+    for (let k = 0; k < 4; k++) PROPS.push(['old_tyre', 13, -20, k * 0.7, k, 1.8, true]);
+    for (let k = 0; k < 3; k++) PROPS.push(['old_tyre', 14.2, -18.6, k * 1.1, k, 1.8, true]);
+    import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+      const L = new GLTFLoader(), cache = {};
+      const get = (n) => cache[n] || (cache[n] = L.loadAsync(`models/props/${n}.glb`).then((gl) => {
+        gl.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+        return gl.scene;
+      }));
+      for (const [n, x, z, ry, y0, sc, flat] of PROPS) get(n).then((model) => {
+        const o = new THREE.Group(), m = model.clone(true); o.add(m);
+        m.scale.setScalar(sc);
+        if (flat) m.rotation.x = Math.PI / 2;
+        o.rotation.y = ry; o.updateMatrixWorld(true);
+        const b = new THREE.Box3().setFromObject(o);
+        // 輪胎：y0＝第幾層（照實際厚度往上疊）；其他：y0＝放在多高（公尺）
+        const y = flat ? y0 * (b.max.y - b.min.y) : y0;
+        o.position.set(x, y - b.min.y, z); g.add(o);
+        if (n === 'old_tyre') torusTires.forEach((t) => (t.visible = false));
+      }).catch((e) => console.warn('改裝廠道具載入失敗：', n, e));
+    }).catch(() => {});
     const yel = stdMat({ color: 0xf2b705, roughness: 0.5, metalness: 0.4 });
     for (const [x, z] of [[-4, -12], [4, -12], [-4, 12], [4, 12]]) mesh(new THREE.BoxGeometry(0.5, 4, 0.5), yel, x * 2.6, 2, z * 1.6, g);
     for (const [x, y, z] of [[-8, 10, -12], [8, 10, -12], [-8, 10, 12], [8, 10, 12], [0, 10, 0]]) {

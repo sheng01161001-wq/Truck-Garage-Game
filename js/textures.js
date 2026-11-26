@@ -2,9 +2,67 @@
 import * as THREE from 'three';
 import { canvasTex, rng, addGrain, makeNoise, FONT, roundRectPath, clamp } from './util.js';
 
+// ---------- 實拍照片貼圖（Poly Haven，CC0，textures/）----------
+// 先用程式畫的貼圖，照片在背景載完再換上；載不到（離線）就一直用程式畫的。
+const PHOTOS = new Map();   // 名稱 → Promise<{ img, nor, arm }>
+const loader = new THREE.TextureLoader();
+export function photoSet(name) {
+  if (!PHOTOS.has(name)) {
+    const one = (suffix, srgb) => loader.loadAsync(`textures/${name}_${suffix}.jpg`).then((t) => {
+      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t;
+    });
+    PHOTOS.set(name, Promise.all([one('Diffuse', true), one('nor_gl', false), one('arm', false)])
+      .then(([diff, nor, arm]) => ({ diff, img: diff.image, nor, arm })));
+  }
+  return PHOTOS.get(name);
+}
+// 在畫布上鋪照片（px＝一張照片在畫布上幾個像素），再乘一個顏色調亮暗
+function tilePhoto(ctx, img, w, h, px, tint = null) {
+  for (let y = 0; y < h; y += px) for (let x = 0; x < w; x += px) ctx.drawImage(img, x, y, px, px);
+  if (tint) { ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = tint; ctx.fillRect(0, 0, w, h); ctx.globalCompositeOperation = 'source-over'; }
+}
+// 照片載完後重畫畫布貼圖（painter 第 4 個參數拿到照片）
+function redrawWithPhoto(tex, name, painter, after) {
+  photoSet(name).then((p) => {
+    const c = tex.image, ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    painter(ctx, c.width, c.height, p.img);
+    tex.needsUpdate = true;
+    if (after) after(p);
+  }).catch((e) => console.warn('照片貼圖載入失敗，用程式畫的：', name, e));
+  return tex;
+}
+// 材質加上照片的凹凸（法線）和粗糙度細節；rx, ry＝在這個材質的 UV 上重複幾次
+export function photoDetail(mat, name, rx, ry, normalScale = 1) {
+  photoSet(name).then(({ nor, arm }) => {
+    const n = nor.clone(); n.repeat.set(rx, ry); n.needsUpdate = true;
+    const a = arm.clone(); a.repeat.set(rx, ry); a.needsUpdate = true;
+    mat.normalMap = n; mat.normalScale = new THREE.Vector2(normalScale, normalScale);
+    mat.roughnessMap = a; mat.bumpMap = null;
+    mat.needsUpdate = true;
+  }).catch(() => {});
+  return mat;
+}
+// 直接用照片當貼圖（草地、人行道）：先放程式畫的，載完換照片
+export function photoMap(mat, name, rx, ry, normalScale = 1) {
+  photoSet(name).then(({ diff }) => {
+    const d = diff.clone(); d.repeat.set(rx, ry); d.needsUpdate = true;
+    if (mat.map) mat.map.dispose();
+    mat.map = d; mat.needsUpdate = true;
+  }).catch(() => {});
+  return photoDetail(mat, name, rx, ry, normalScale);
+}
+
 // 柏油路：顆粒、補丁、裂縫、胎痕、磨損標線（一張 = 14 公尺寬 × 28 公尺長）
 export function asphaltTex(kind) {
-  return canvasTex(256, 512, (ctx, w, h) => {
+  return redrawWithPhoto(asphaltTex0(kind), 'asphalt_02', (ctx, w, h, img) => paintAsphalt(kind, ctx, w, h, img));
+}
+function asphaltTex0(kind) {
+  return canvasTex(256, 512, (ctx, w, h) => paintAsphalt(kind, ctx, w, h, null), { repeat: true });
+}
+function paintAsphalt(kind, ctx, w, h, photo) {
+  {
     const r = rng(kind.length * 31 + 5);
     ctx.fillStyle = '#3b3d40'; ctx.fillRect(0, 0, w, h);
     for (let i = 0; i < 9000; i++) {
@@ -26,6 +84,11 @@ export function asphaltTex(kind) {
       ctx.stroke();
     }
     addGrain(ctx, w, h, 14, 11);
+    // 有照片就鋪實拍柏油（照片 3 公尺見方 ≈ 51 像素），再畫回車道的輪胎痕
+    if (photo) {
+      tilePhoto(ctx, photo, w, h, w / 5, '#ababab');   // 剛好整除，重複時才不會有接縫
+      if (kind !== 'plain') { ctx.fillStyle = 'rgba(16,16,18,0.18)'; for (const x of [46, 82, 174, 210]) ctx.fillRect(x - 7, 0, 14, h); }
+    }
     ctx.globalAlpha = 0.88;
     if (kind === 'city') {
       ctx.fillStyle = '#e6e6e6'; ctx.fillRect(6, 0, 5, h); ctx.fillRect(w - 11, 0, 5, h);
@@ -36,7 +99,7 @@ export function asphaltTex(kind) {
     }
     ctx.globalAlpha = 1;
     for (let i = 0; i < 1600; i++) { ctx.fillStyle = 'rgba(55,55,58,.55)'; ctx.fillRect(r() * w, r() * h, 1.5, 1.5); }
-  }, { repeat: true });
+  }
 }
 
 // 凹凸用的灰階雜訊
@@ -83,9 +146,11 @@ export function grassTex() {
 
 // 大樓外牆：一張 = 4 層樓 × 4 個開間（12×12 公尺）。回傳白天貼圖與晚上亮燈貼圖
 export function facadeTex(type, seed) {
-  const r = rng(seed);
+  let r = rng(seed);
   const lit = [];
-  const map = canvasTex(256, 256, (ctx, w, h) => {
+  // 照片重畫時從頭再算一次亂數，窗戶位置和亮燈的窗才會跟晚上的亮燈貼圖對得上
+  const paint = (ctx, w, h, photo) => {
+    r = rng(seed); lit.length = 0;
     if (type === 'office') {
       ctx.fillStyle = '#8f98a0'; ctx.fillRect(0, 0, w, h);
       for (let f = 0; f < 4; f++) for (let b = 0; b < 4; b++) {
@@ -102,6 +167,7 @@ export function facadeTex(type, seed) {
         for (let y = 0, row = 0; y < h; y += 6, row++) for (let x = row % 2 ? -6 : 0; x < w; x += 12) {
           const c = 120 + r() * 30; ctx.fillStyle = `rgb(${c | 0},${(c * 0.55) | 0},${(c * 0.42) | 0})`; ctx.fillRect(x + 0.5, y + 0.5, 11, 5);
         }
+        if (photo) tilePhoto(ctx, photo, w, h, w / 4, '#e6e6e6');   // 實拍紅磚（3 公尺見方，一張 12 公尺）
       } else {
         ctx.fillStyle = type === 'apartment' ? '#cbc2b0' : '#b8bcc0'; ctx.fillRect(0, 0, w, h);
         addGrain(ctx, w, h, 16, seed);
@@ -123,7 +189,9 @@ export function facadeTex(type, seed) {
       g.addColorStop(0, 'rgba(40,40,40,0.0)'); g.addColorStop(1, 'rgba(40,40,40,0.12)');
       ctx.fillStyle = g; ctx.fillRect(x, 0, 2 + r() * 6, h);
     }
-  });
+  };
+  const map = canvasTex(256, 256, (ctx, w, h) => paint(ctx, w, h, null));
+  if (type === 'brick') redrawWithPhoto(map, 'brick_wall_006', paint);
   const emi = canvasTex(256, 256, (ctx, w, h) => {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
     for (const [x, y, ww, hh] of lit) {

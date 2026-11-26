@@ -14,6 +14,16 @@ export function createEnv(renderer, scene) {
   const envScene = new THREE.Scene(); const envSky = new Sky(); envSky.scale.setScalar(2000); envScene.add(envSky);
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null;
+  // 實拍天空（Poly Haven，CC0）：背景載入，載到前先用程式天空；載不到就一直用程式天空
+  let hdrEnv = null;
+  import('three/addons/loaders/RGBELoader.js')
+    .then(({ RGBELoader }) => new RGBELoader().loadAsync('textures/sky_partly_cloudy_1k.hdr'))
+    .then((hdr) => {
+      hdr.mapping = THREE.EquirectangularReflectionMapping;
+      hdrEnv = pmrem.fromEquirectangular(hdr).texture; hdr.dispose();
+      if (state.time) apply(state.time, state.weather);
+    })
+    .catch((e) => console.warn('實拍天空載入失敗，用程式天空：', e));
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffffff, 3);
@@ -87,11 +97,15 @@ export function createEnv(renderer, scene) {
     rain.visible = rainy;
     state.night = P.night * (rainy ? 1.2 : 1);
     state.wet = rainy;
-    // 反射用環境光
+    // 反射用環境光：白天晴天用實拍天空（烤漆、電鍍才有真的雲和光），其他時候用程式算的天空
     if (envRT) envRT.dispose();
-    envSky.visible = true;
-    envRT = pmrem.fromScene(envScene, 0, 0.1, 3000);
-    scene.environment = envRT.texture;
+    envRT = null;
+    if (time === 'day' && !rainy && !foggy && hdrEnv) scene.environment = hdrEnv;
+    else {
+      envSky.visible = true;
+      envRT = pmrem.fromScene(envScene, 0, 0.1, 3000);
+      scene.environment = envRT.texture;
+    }
     scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1);
     state.hemiBase = hemi.intensity; state.envBase = scene.environmentIntensity;
     for (let i = 0; i < RAIN; i++) resetDrop(i, 0, 0, 0, true);

@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { clamp, makeNoise, canvasTex, FONT } from './util.js';
 import { asphaltTex, noiseBumpTex, concreteTex, corrugatedTex, boardTex, stripeTex } from './textures.js';
+import { registerStruct, pickLevel, structHeights, onStruct } from './elevated.js';
 
 const N = makeNoise(42);
 const sm = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
@@ -110,8 +111,8 @@ export function hwAt(s, o = 0) {
 }
 export const inCity = (x, z) => Math.abs(x) <= CITY && Math.abs(z) <= CITY;
 // N：依道路區段回傳實際速限（km/h），市區、國道與山路採不同限制。
-export function speedLimitAt(x, z) {
-  if (isInterchangeRoad(x, z)) return 40;
+export function speedLimitAt(x, z, y = 0) {
+  if (inCity(x, z) && structHeights(x, z).some((k) => k.st.kind === 'ramp' && Math.abs(k.y - y) < 1.2)) return 40; // 匝道、環道
   if (inCity(x, z)) return 50;
   const q = hwProject(x, z);
   if (q.s < 0 || q.s > LEN) return 50;
@@ -148,33 +149,22 @@ const INTERCHANGE_RAMPS = [
   { name: '西北環道', a: { x: 150, z: 234 }, c1: { x: 150, z: 180 }, c2: { x: 195, z: 175 }, b: { x: 240, z: 175 } },
   { name: '西南環道', a: { x: 150, z: 246 }, c1: { x: 150, z: 300 }, c2: { x: 195, z: 305 }, b: { x: 240, z: 305 } },
 ];
-export function interchangeHeightAt(x, z) {
-  const main = flyoverHeightAt(x, z);
-  if (main !== null) return main;
-  let best = null, dist = 8.5;
-  for (const r of INTERCHANGE_RAMPS) for (let i = 0; i <= 64; i++) {
-    const q = interchangeRamp(i / 64, r), d = Math.hypot(x - q.x, z - q.z);
-    if (d < dist) { dist = d; best = q.y; }
-  }
-  return best;
+// 把 GPT 做的高架橋、東區高架、四條匝道登記到共用的高架資料（路面高度、導航、小地圖都用）
+{
+  const b = []; for (let x = -150; x <= 150.01; x += 3) b.push({ x, z: 80, y: bridgeHeightAt(x, 80) });
+  registerStruct({ id: 'cityBridge', name: '市區高架橋', kind: 'bridge', hw: 7.4, pts: b });
+  const f = []; for (let z = 100; z <= 380.01; z += 3) f.push({ x: 240, z, y: flyoverHeightAt(240, z) });
+  registerStruct({ id: 'eastFlyover', name: '東區高架', kind: 'bridge', hw: 7.4, pts: f });
+  INTERCHANGE_RAMPS.forEach((r, k) => {
+    const pts = []; for (let i = 0; i <= 64; i++) pts.push(interchangeRamp(i / 64, r));
+    registerStruct({ id: 'eastRamp' + k, name: r.name, kind: 'ramp', hw: 5.5, pts });
+  });
 }
-export function isInterchangeRoad(x, z) {
-  if (flyoverHeightAt(x, z) !== null) return true;
-  for (const r of INTERCHANGE_RAMPS) for (let i = 0; i <= 64; i++) {
-    const q = interchangeRamp(i / 64, r);
-    if (Math.hypot(x - q.x, z - q.z) < 6.5) return true;
-  }
-  return false;
-}
+export const isInterchangeRoad = (x, z) => onStruct(x, z);
 // 地面高度（市區平面道路 0；橋面、匝道依各自高度抬升）
 // refY＝車子現在的高度：橋下的路口要留在地面，不會突然被抬到橋上
-export function groundAt(x, z, refY = null) {
-  if (inCity(x, z)) {
-    const e = interchangeHeightAt(x, z) ?? bridgeHeightAt(x, z);
-    if (e === null) return 0;
-    if (refY === null) return e;
-    return Math.abs(e - refY) <= Math.abs(refY) + 0.05 ? e : 0;
-  }
+export function groundAt(x, z, refY = null, tol = 0.6) {
+  if (inCity(x, z)) return pickLevel(x, z, refY, tol);
   const q = hwProject(x, z);
   return q.s < 0 ? 0 : roadY(q.s);
 }
@@ -338,7 +328,7 @@ export function buildHighway(root, ctx) {
     // 主線連續防撞護欄（兩側鋼樑）。
     for(const side of [-1,1]) for(let i=0;i<main.length-1;i+=2){const a=main[i],b=main[Math.min(i+2,main.length-1)];const beam=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.22,Math.hypot(b.z-a.z,b.x-a.x)+0.08),rail);beam.position.set(240+side*6.78,(a.y+b.y)/2+1.0,(a.z+b.z)/2);beam.rotation.x=-Math.atan2(b.y-a.y,b.z-a.z);root.add(beam);}
     // 主線橋墩及橫梁
-    for(const z of [150,210,270,330]) { const y=flyoverHeightAt(240,z); if(y>1.2){const h=y-0.5;PIERS.push({x:240,z,sx:1.4,sz:1.4});const pier=new THREE.Mesh(new THREE.BoxGeometry(1.4,h,1.4),concrete);pier.position.set(240,h/2,z);pier.castShadow=true;pier.receiveShadow=true;root.add(pier);const cap=new THREE.Mesh(new THREE.BoxGeometry(9,0.55,2.8),concrete);cap.position.set(240,y-0.35,z);root.add(cap);} }
+    for(const z of [150,210,270,330]) { const y=flyoverHeightAt(240,z); if(y>1.2){const h=y-0.5;PIERS.push({x:240,z,sx:1.4,sz:1.4,top:y});const pier=new THREE.Mesh(new THREE.BoxGeometry(1.4,h,1.4),concrete);pier.position.set(240,h/2,z);pier.castShadow=true;pier.receiveShadow=true;root.add(pier);const cap=new THREE.Mesh(new THREE.BoxGeometry(9,0.55,2.8),concrete);cap.position.set(240,y-0.35,z);root.add(cap);} }
     // 四條獨立環狀匝道：每條均有實際路面高度、護欄、中央標線及橋墩支撐。
     for (const ramp of INTERCHANGE_RAMPS) {
       const samples=[]; for(let i=0;i<=64;i++) samples.push(interchangeRamp(i/64,ramp));
@@ -349,7 +339,7 @@ export function buildHighway(root, ctx) {
       }
       for(let i=8;i<samples.length-5;i+=12){
         const q=samples[i]; if(q.y<1.25) continue;
-        PIERS.push({x:q.x,z:q.z,sx:1.15,sz:1.15});
+        PIERS.push({x:q.x,z:q.z,sx:1.15,sz:1.15,top:q.y});
         const pier=new THREE.Mesh(new THREE.BoxGeometry(1.15,Math.max(0.7,q.y-0.55),1.15),concrete);
         pier.position.set(q.x,Math.max(0.35,(q.y-0.55)/2),q.z); pier.castShadow=true; pier.receiveShadow=true; root.add(pier);
         const cap=new THREE.Mesh(new THREE.BoxGeometry(3.2,0.38,2.1),concrete); cap.position.set(q.x,q.y-0.22,q.z); root.add(cap);
@@ -475,7 +465,7 @@ export function buildHighway(root, ctx) {
     }
     for (const x of [-42, 0, 42]) {
       const h = bridgeY(x) - 0.72;
-      PIERS.push({ x, z: bridgeZ, sx: 1.4, sz: 1.4 });
+      PIERS.push({ x, z: bridgeZ, sx: 1.4, sz: 1.4, top: bridgeY(x) });
       const pier = new THREE.Mesh(new THREE.BoxGeometry(1.4, Math.max(0.6, h), 1.4), concrete);
       pier.position.set(x, Math.max(0.3, h / 2), bridgeZ); pier.castShadow = true; pier.receiveShadow = true; root.add(pier);
       const cap = new THREE.Mesh(new THREE.BoxGeometry(9, 0.65, 2.8), concrete); cap.position.set(x, h - 0.2, bridgeZ); root.add(cap);
