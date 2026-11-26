@@ -63,6 +63,7 @@ export function drawMinimap(cv, st) {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (st.cars) { ctx.fillStyle = '#d0d6dc'; for (const p of st.cars) { const [x, y] = toScreen(p.x, p.z); ctx.fillRect(x - 1.5, y - 1.5, 3, 3); } }
+  if (st.incidents) for (const p of st.incidents) { const [x, y] = toScreen(p.x, p.z); ctx.fillStyle = '#ff3b30'; ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + 5.5, y + 4); ctx.lineTo(x - 5.5, y + 4); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(x - 0.7, y - 2.5, 1.4, 3.5); } // 事故：紅色三角
   if (st.selectedFleet) { const [x,y]=toScreen(st.selectedFleet.x,st.selectedFleet.z);ctx.fillStyle='#ff9f1c';ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke(); } 
   const dot = (x, z, col, r, label) => {
     const [sx, sy] = toScreen(x, z); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();

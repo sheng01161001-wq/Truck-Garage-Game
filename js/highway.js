@@ -507,6 +507,11 @@ export function buildHighway(root, ctx) {
     dash.rotation.y = p.hd;
     dash.receiveShadow = true;
     root.add(dash);
+    // v23：每個方向兩條車道（收費站、休息站、迴轉區以外）
+    if (s > 100 && s < LEN - PAD_LEN - 60 && (s < REST.s0 || s > REST.s1)) for (const side of [-1, 1]) {
+      const q = hwAt(s, side * 3.5), ln = new THREE.Mesh(dashGeo, markingMat);
+      ln.position.set(q.x, q.y + 0.055, q.z); ln.rotation.y = q.hd; root.add(ln);
+    }
     for (const side of [-1, 1]) {
       const q = hwAt(s + 1.8, side * (p.w - 0.55));
       const edge = new THREE.Mesh(edgeGeo, markingMat);

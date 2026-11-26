@@ -1,15 +1,18 @@
-// 路上的車流：靠右行駛、路口轉彎、遇紅燈停、前面有車（或卡車）會減速
+// 路上的車流：靠右行駛、每個方向兩條車道（跟車、換車道、超車）、路口轉彎、遇紅燈停、事故拋錨
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ROADS, DEPOTS, lightState, hasLight } from './world.js';
 import { rng, clamp } from './util.js';
-import { hwAt, LEN as HW_LEN, TOLL_S, PTS as HW_PTS, CITY_SIZE, REST_FUEL, REST_REPAIR } from './highway.js';
+import { hwAt, hwProject, LEN as HW_LEN, TOLL_S, PTS as HW_PTS, CITY_SIZE, REST_FUEL, REST_REPAIR } from './highway.js';
 
 const LANE = 3.5;
+const inCityXZ = (x, z) => Math.abs(x) <= CITY_SIZE && Math.abs(z) <= CITY_SIZE;
 const COLORS = ['#f2f2f2', '#c9ccd1', '#1c1c1f', '#2b3a55', '#8a1f1f', '#5b6770', '#d9d1c0', '#0f4c5c', '#e8e8e8', '#3d3d3d'];
 
-function lanePos(axis, line, dir, s) {
-  return axis === 'z' ? { x: line - LANE * dir, z: s } : { x: s, z: line + LANE * dir };
+// off＝離道路中線多遠（右手邊）：內側車道 1.75、外側車道 5.25
+const LANES = [1.75, 5.25];
+function lanePos(axis, line, dir, s, off = LANE) {
+  return axis === 'z' ? { x: line - off * dir, z: s } : { x: s, z: line + off * dir };
 }
 function headingOf(axis, dir) { return axis === 'z' ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2); }
 
@@ -174,7 +177,8 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
     const axis = r() < 0.5 ? 'z' : 'x', line = ROADS[Math.floor(r() * ROADS.length)], dir = r() < 0.5 ? 1 : -1;
     // 起點：兩個路口之間
     const seg = Math.floor(r() * (ROADS.length - 1)), a = ROADS[seg] + 12, b = ROADS[seg + 1] - 12;
-    cars.push({ g, len, axis, line, dir, s: a + r() * (b - a), v: 8, vmax: 10 + r() * 4, turn: null, stall: 0 });
+    const lane = r() < 0.5 ? 0 : 1;
+    cars.push({ g, len, axis, line, dir, s: a + r() * (b - a), v: 8, vmax: 10 + r() * 4, turn: null, stall: 0, lane, lo: LANES[lane], laneCD: 0, yaw: 0 });
   }
   // 國道上的車（往西開回市區、往東開到林場前面迴轉）
   const hwCars = [];
@@ -182,7 +186,8 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
     const { g, len } = makeCar(i % 3 === 0 ? 'lorry' : types[(i + 1) % types.length], Math.floor(r() * COLORS.length));
     g.rotation.order = 'YXZ'; scene.add(g);
     const dir = i % 2 ? 1 : -1;
-    hwCars.push({ g, len, dir, s: 200 + r() * (HW_LEN - 350), v: 12, vmax: 15 + r() * 5, hw: true, ut: null, stall: 0, o: dir * 3.5, rest: null });
+    const hl = len > 8 ? 1 : r() < 0.5 ? 0 : 1; // 大車走外側
+    hwCars.push({ g, len, dir, s: 200 + r() * (HW_LEN - 350), v: 12, vmax: len > 8 ? 12 + r() * 2 : 15 + r() * 5, hw: true, ut: null, stall: 0, o: dir * LANES[hl], hl, laneCD: 0, rest: null });
   }
   let ALL = cars.concat(hwCars);
   const managedFleet = new Map();
@@ -193,11 +198,11 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
   function respawnFar(c, me) {
     for (let k = 0; k < 30; k++) {
       let p;
-      if (c.hw) { const s = 120 + r() * (UT_S - 150), d = r() < 0.5 ? 1 : -1; p = hwAt(s, d * 3.5); if (far(p, me)) { Object.assign(c, { s, dir: d, ut: null, v: 0, stall: 0, o: d * 3.5, rest: null }); return; } }
+      if (c.hw) { const s = 120 + r() * (UT_S - 150), d = r() < 0.5 ? 1 : -1; p = hwAt(s, d * 3.5); if (far(p, me)) { Object.assign(c, { s, dir: d, ut: null, v: 0, stall: 0, o: d * LANES[1], hl: 1, rest: null, crashT: 0 }); return; } }
       else {
         const axis = r() < 0.5 ? 'z' : 'x', line = ROADS[Math.floor(r() * ROADS.length)], dir = r() < 0.5 ? 1 : -1, seg = Math.floor(r() * (ROADS.length - 1));
-        const s = ROADS[seg] + 14 + r() * 132; p = lanePos(axis, line, dir, s);
-        if (far(p, me)) { Object.assign(c, { axis, line, dir, s, turn: null, passed: null, v: 0, stall: 0 }); return; }
+        const s = ROADS[seg] + 14 + r() * 132, lane = r() < 0.5 ? 0 : 1; p = lanePos(axis, line, dir, s, LANES[lane]);
+        if (far(p, me)) { Object.assign(c, { axis, line, dir, s, turn: null, passed: null, v: 0, stall: 0, lane, lo: LANES[lane], plan: null, crashT: 0 }); return; }
       }
     }
     c.stall = 0;
@@ -214,21 +219,108 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
     return best;
   }
 
-  function startTurn(c, cross) {
+  // 右轉？（靠右行駛：右轉走外側車道、左轉走內側車道）
+  const isRight = (c, nd) => (c.axis === 'z' ? nd === -c.dir : nd === c.dir);
+  // 到路口前先決定要直走還是轉彎，才來得及換到對的車道
+  function chooseTurn(c, cross) {
+    const lastX = ROADS[ROADS.length - 1];
+    if (c.axis === 'x' && c.line === -80 && c.dir > 0 && cross === lastX) return { straight: true }; // 最東邊的路口：直走上國道（出城只有這條路）
     const opts = [];
     if (ROADS.includes(cross + c.dir * 160)) opts.push({ straight: true });
-    const lastX = ROADS[ROADS.length - 1];
-    if (c.axis === 'x' && c.line === -80 && c.dir > 0 && cross === lastX) { c.passed = cross; return; } // 最東邊的路口：直走上國道（出城只有這條路）
     if (c.axis === 'x' && c.line === -80 && c.dir > 0 && cross >= lastX - 160) opts.push({ straight: true }, { straight: true });
     for (const nd of [1, -1]) if (ROADS.includes(c.line + nd * 160)) opts.push({ nd });
-    const o = opts[Math.floor(r() * opts.length)];
+    return opts[Math.floor(r() * opts.length)] || { straight: true };
+  }
+  function startTurn(c, cross, o) {
+    c.plan = null;
     if (!o || o.straight) { c.passed = cross; return; }
-    const p0 = lanePos(c.axis, c.line, c.dir, cross - c.dir * 7);
-    const naxis = c.axis === 'z' ? 'x' : 'z', nline = cross, nd = o.nd;
-    const p2 = lanePos(naxis, nline, nd, c.line + nd * 7);
-    const p1 = c.axis === 'z' ? { x: c.line - LANE * c.dir, z: nline + LANE * nd } : { x: nline - LANE * nd, z: c.line + LANE * c.dir };
+    const naxis = c.axis === 'z' ? 'x' : 'z', nline = cross, nd = o.nd, lane = isRight(c, nd) ? 1 : 0, offB = LANES[lane];
+    const p0 = lanePos(c.axis, c.line, c.dir, cross - c.dir * 7, c.lo);
+    const p2 = lanePos(naxis, nline, nd, c.line + nd * 7, offB);
+    const p1 = c.axis === 'z' ? { x: c.line - c.lo * c.dir, z: nline + offB * nd } : { x: nline - offB * nd, z: c.line + c.lo * c.dir };
     const len = Math.hypot(p1.x - p0.x, p1.z - p0.z) + Math.hypot(p2.x - p1.x, p2.z - p1.z);
-    c.turn = { p0, p1, p2, t: 0, len: len * 0.8, naxis, nline, nd, ns: c.line + nd * 7 };
+    c.turn = { p0, p1, p2, t: 0, len: len * 0.8, naxis, nline, nd, ns: c.line + nd * 7, lane };
+  }
+  // ---- 換車道 ----
+  const sameRoad = (a, b) => !b.turn && !b.hw && b.axis === a.axis && b.line === a.line && b.dir === a.dir;
+  function leaderOf(c) {
+    let best = null, bd = 32;
+    for (const o of cars) {
+      if (o === c || !sameRoad(c, o) || Math.abs(o.lo - c.lo) > 1.8) continue;
+      const ds = (o.s - c.s) * c.dir;
+      if (ds > 0 && ds < bd) { bd = ds; best = o; }
+    }
+    return best;
+  }
+  function laneFree(c, lane, rigPts) {
+    const off = LANES[lane];
+    for (const o of cars) {
+      if (o === c || !sameRoad(c, o)) continue;
+      if (Math.abs(o.lo - off) > 2.2 && Math.abs(LANES[o.lane] - off) > 0.1) continue;
+      const ds = (o.s - c.s) * c.dir;
+      if (ds > -12 && ds < 22) return false;
+    }
+    for (const p of rigPts) { // 玩家的卡車
+      const lat = c.axis === 'z' ? (c.line - p.x) * c.dir : (p.z - c.line) * c.dir, ds = ((c.axis === 'z' ? p.z : p.x) - c.s) * c.dir;
+      if (Math.abs(lat - off) < 3 && ds > -16 && ds < 26) return false;
+    }
+    return true;
+  }
+  function laneLogic(c, dist, carFree, redStop, rigPts, dt) {
+    const other = 1 - c.lane;
+    const needed = c.plan && c.plan.o && !c.plan.o.straight ? (isRight(c, c.plan.o.nd) ? 1 : 0) : null;
+    let want = null;
+    if (needed !== null && needed !== c.lane) { if (dist > 14) want = needed; }
+    else if (dist > 35 && carFree < 24 && !redStop) {
+      const lead = leaderOf(c); // 前面的車太慢（或拋錨）、或是卡車停在車道上：從旁邊車道繞過去
+      const stuck = carFree < 15 && c.v < 1.5 && (!lead || lead.v < 0.5); // 前面整個停住（拋錨、卡車停在路上）：就算等一下要轉彎也先繞過去
+      if (((lead && lead.v < c.vmax * 0.6) || stuck) && (needed === null || needed === other || stuck)) want = other;
+    } else if (c.lane === 0 && needed !== 0 && dist > 40 && carFree > 45 && r() < dt * 0.3) want = 1; // 超完車回外側
+    if (want !== null && laneFree(c, want, rigPts)) { c.lane = want; c.laneCD = 3; }
+  }
+  // ---- 事故／拋錨：車停在原地閃故障燈，後面的車換車道繞過去 ----
+  const hazMat = new THREE.MeshStandardMaterial({ color: 0x552200, emissive: 0xff8c00, emissiveIntensity: 0 });
+  const hazG = new THREE.BoxGeometry(0.22, 0.14, 0.06);
+  function setHazard(c, on, t) {
+    if (on && (!c.hazard || !c.hazard.parent)) {
+      c.hazard = new THREE.Group();
+      for (const x of [-0.85, 0.85]) for (const z of [1, -1]) { const m = new THREE.Mesh(hazG, hazMat); m.position.set(x, 0.85, z * (c.len / 2 + 0.03)); c.hazard.add(m); }
+      c.g.add(c.hazard);
+    }
+    if (c.hazard) c.hazard.visible = on && (t % 0.8) < 0.4;
+  }
+  // 警告三角架＋三角錐（同一時間只有一個隨機事故現場）
+  const scenery = new THREE.Group(); scenery.visible = false; scene.add(scenery);
+  {
+    const red = new THREE.MeshStandardMaterial({ color: 0xd32f2f, emissive: 0x550000, roughness: 0.5 }), white = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.5 });
+    const tri = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.8, 3), red); tri.position.set(0, 0.4, -12); tri.rotation.y = Math.PI / 2; scenery.add(tri);
+    for (let k = 0; k < 3; k++) {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.75, 12), k % 2 ? white : red); cone.position.set(-0.6 + k * 0.6, 0.38, -5.5 - k * 1.6); scenery.add(cone);
+    }
+  }
+  let incT = 50 + r() * 40, incCar = null;
+  function crash(car, secs = 25) {
+    if (!car || !(cars.includes(car) || hwCars.includes(car))) return;
+    car.crashT = Math.max(car.crashT || 0, secs); car.v = 0;
+  }
+  function randomIncident(dt, rigPts) {
+    if (incCar && incCar.crashT > 0) {
+      const p = incCar.g.position, h = incCar.g.rotation.y;
+      scenery.position.set(p.x, p.y, p.z); scenery.rotation.y = h; scenery.visible = true;
+      return;
+    }
+    scenery.visible = false; incCar = null;
+    incT -= dt; if (incT > 0) return;
+    incT = 70 + r() * 60;
+    const me = rigPts[0];
+    const cand = cars.filter((c) => !c.turn && !(c.crashT > 0) && (() => {
+      const cr = nextCross(c), d = cr === null ? 99 : (cr - c.s) * c.dir, back = 160 - d; // 離上一個路口多遠
+      const dm = Math.hypot(c.g.position.x - me.x, c.g.position.z - me.z);
+      return d > 40 && back > 30 && dm > 110 && dm < 420;
+    })());
+    if (!cand.length) return;
+    incCar = cand[Math.floor(r() * cand.length)];
+    crash(incCar, 75);
   }
 
   // 卡車（玩家）位置點：用來讓車子停下來、也用來算碰撞
@@ -255,39 +347,52 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
   function update(dt, t, rigPts, night) {
     ALL = cars.concat(hwCars);
     const toHw = [], toCity = [];
+    randomIncident(dt, rigPts);
     for (const c of cars) {
+      if (c.lo === undefined) { c.lane = c.lane ?? 1; c.lo = LANES[c.lane]; }
+      c.laneCD = Math.max(0, (c.laneCD || 0) - dt);
       let pos, h;
       if (c.turn) {
         const T = c.turn, u = T.t, a = 1 - u;
         pos = { x: a * a * T.p0.x + 2 * a * u * T.p1.x + u * u * T.p2.x, z: a * a * T.p0.z + 2 * a * u * T.p1.z + u * u * T.p2.z };
         const dx = 2 * a * (T.p1.x - T.p0.x) + 2 * u * (T.p2.x - T.p1.x), dz = 2 * a * (T.p1.z - T.p0.z) + 2 * u * (T.p2.z - T.p1.z);
         h = Math.atan2(dx, dz);
-      } else { pos = lanePos(c.axis, c.line, c.dir, c.s); h = headingOf(c.axis, c.dir); }
+      } else { pos = lanePos(c.axis, c.line, c.dir, c.s, c.lo); h = headingOf(c.axis, c.dir) - (c.yaw || 0); }
       const fwd = { x: Math.sin(h), z: Math.cos(h) };
       let free = obstacleAhead(c, pos, fwd, rigPts);
+      const carFree = free;
       let target = c.turn ? 6 : c.vmax;
       if (!c.turn) {
         const cross = nextCross(c);
+        let dist = Infinity, redStop = false;
         if (cross !== null) {
-          const dist = (cross - c.s) * c.dir;
+          dist = (cross - c.s) * c.dir;
           if (hasLight(cross, c.line) || hasLight(c.line, cross)) {
             const st = lightState(t, c.axis);
             const stopAt = dist - 10;
-            if ((st === 'r' || (st === 'y' && stopAt > 4)) && stopAt > -1) free = Math.min(free, stopAt);
+            if ((st === 'r' || (st === 'y' && stopAt > 4)) && stopAt > -1) { free = Math.min(free, stopAt); redStop = true; }
           }
+          if (dist < 75 && c.passed !== cross && (!c.plan || c.plan.cross !== cross)) c.plan = { cross, o: chooseTurn(c, cross) };
           if (dist < 18) target = Math.min(target, 8);
-          if (dist <= 7 && c.passed !== cross) startTurn(c, cross);
+          if (dist <= 7 && c.passed !== cross && !(c.crashT > 0)) startTurn(c, cross, c.plan && c.plan.cross === cross ? c.plan.o : chooseTurn(c, cross));
         }
+        if (!c.turn && !(c.crashT > 0) && c.laneCD <= 0) laneLogic(c, dist, carFree, redStop, rigPts, dt);
+        // 換車道：慢慢往旁邊移，車頭跟著偏一點
+        const k = Math.max(0.4, Math.min(1, c.v / 3)), step = clamp(LANES[c.lane] - c.lo, -1.5 * dt * k, 1.5 * dt * k); // 停著也能慢慢切出去（繞過停在路上的東西）
+        c.lo += step; c.yaw = Math.atan2(step / Math.max(dt, 1e-3), Math.max(c.v, 1)) * 0.8;
       }
-      const brakeV = free < 0 ? 0 : Math.sqrt(2 * 5 * Math.max(0, free));
+      // 跟車：保持大約 1.3 秒的車距，不會一直貼著前車
+      const brakeV = free < 0 ? 0 : Math.min(Math.sqrt(2 * 5 * Math.max(0, free)), 1.5 + free / 1.3);
       target = Math.min(target, brakeV);
+      if (c.crashT > 0) { target = 0; c.crashT -= dt; if (c.crashT <= 0) c.crashT = 0; }
+      setHazard(c, c.crashT > 0, t);
       c.v += Math.max(-8 * dt, Math.min(2.5 * dt, target - c.v));
       if (c.v < 0) c.v = 0;
-      c.stall = c.v < 0.2 ? c.stall + dt : 0;
+      c.stall = c.v < 0.2 && !(c.crashT > 0) ? c.stall + dt : 0;
       if (c.stall > STALL_MAX) { respawnFar(c, rigPts[0]); continue; }
       if (c.turn) {
         c.turn.t += (c.v * dt) / c.turn.len;
-        if (c.turn.t >= 1) { const T = c.turn; c.axis = T.naxis; c.line = T.nline; c.dir = T.nd; c.s = T.ns; c.passed = null; c.turn = null; }
+        if (c.turn.t >= 1) { const T = c.turn; c.axis = T.naxis; c.line = T.nline; c.dir = T.nd; c.s = T.ns; c.passed = null; c.turn = null; c.lane = T.lane; c.lo = LANES[T.lane]; c.yaw = 0; c.laneCD = 2; }
       } else {
         c.s += c.v * c.dir * dt;
         // 跑出地圖就換到別條路
@@ -309,12 +414,29 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
     };
     // 休息站：有些車會開進去加油／修車，停一下再開回主線
     const REST_STOP = { 1: { zone: REST_FUEL, o: 16.75, s: 132 }, [-1]: { zone: REST_REPAIR, o: -14.5, s: 136 } };
+    // 國道的車道：平常兩線（大車走外側、超車走內側）；收費站附近和迴轉前只有一線
+    const hwBase = (c) => {
+      if (c.s < 100) return c.dir * 3.5;
+      if (c.dir > 0 && c.s > UT_S - 60) return 3.5;
+      return c.dir * LANES[c.hl ?? 1];
+    };
     const restPlan = (c) => {
       const R = REST_STOP[c.dir], before = (R.s - c.s) * c.dir;
       if (c.rest === null && before > 60 && before < 110) c.rest = r() < 0.35 ? { t: 0, done: false } : false;
-      if (!c.rest) { if (before < -40) c.rest = null; return c.dir * 3.5; }
-      if (c.rest.done) { if (before < -40) c.rest = null; return before < -15 ? c.dir * 3.5 : R.o; }
-      return before < 57 ? R.o : c.dir * 3.5;
+      if (!c.rest) { if (before < -40) c.rest = null; return hwBase(c); }
+      if (c.rest.done) { if (before < -40) c.rest = null; return before < -15 ? hwBase(c) : R.o; }
+      return before < 57 ? R.o : hwBase(c);
+    };
+    const hwLeader = (c) => {
+      let best = null, bd = 36;
+      for (const o of hwCars) { if (o === c || o.dir !== c.dir || o.ut !== null || Math.abs((o.o ?? 0) - c.o) > 1.8) continue; const ds = (o.s - c.s) * c.dir; if (ds > 0 && ds < bd) { bd = ds; best = o; } }
+      return best;
+    };
+    const hwFree = (c, lane) => {
+      const off = c.dir * LANES[lane];
+      for (const o of hwCars) { if (o === c || o.dir !== c.dir || o.ut !== null) continue; if (Math.abs((o.o ?? 0) - off) > 2.2) continue; const ds = (o.s - c.s) * c.dir; if (ds > -15 && ds < 25) return false; }
+      for (const p of rigPts) { if (inCityXZ(p.x, p.z)) continue; const q = hwProject(p.x, p.z); if (Math.abs(q.o - off) < 3 && (q.s - c.s) * c.dir > -18 && (q.s - c.s) * c.dir < 28) return false; }
+      return true;
     };
     for (const c of hwCars) {
       const P = place(c);
@@ -322,7 +444,13 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
       let free = obstacleAhead(c, pos, fwd, rigPts);
       let target = c.ut !== null ? 3 : c.s > 110 ? c.vmax * 0.75 : c.vmax;
       if (c.ut === null && Math.abs(c.s - TOLL_S) < 40) target = Math.abs(c.o ?? 3.5) < 7 ? 9 : 4.5; // ETC 車道 30 公里通過
-      let wantO = c.dir * 3.5;
+      let wantO = hwBase(c);
+      c.laneCD = Math.max(0, (c.laneCD || 0) - dt);
+      if (c.ut === null && !c.rest && !(c.crashT > 0) && c.s > 110 && c.s < UT_S - 80 && c.laneCD <= 0) {
+        const lead = hwLeader(c), other = 1 - (c.hl ?? 1);
+        if (((lead && lead.v < c.vmax * 0.8) || (!lead && free < 15 && c.v < 1.5)) && hwFree(c, other)) { c.hl = other; c.laneCD = 4; } // 超車（或繞過停在路上的卡車）
+        else if ((c.hl ?? 1) === 0 && !lead && hwFree(c, 1) && r() < dt * 0.25) { c.hl = 1; c.laneCD = 4; } // 超完回外側
+      }
       if (c.ut === null) {
         wantO = restPlan(c);
         const R = REST_STOP[c.dir];
@@ -333,17 +461,20 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
         } else if (c.rest && c.rest.done) target = Math.min(target, 7);
       }
       if (c.o === undefined) c.o = c.dir * 3.5;
-      c.o += clamp(wantO - c.o, -2.2 * dt * Math.min(1, c.v / 4), 2.2 * dt * Math.min(1, c.v / 4));
+      const ko = c.laneCD > 0 ? Math.max(0.4, Math.min(1, c.v / 4)) : Math.min(1, c.v / 4); // 剛決定換車道：停著也能切出去
+      c.o += clamp(wantO - c.o, -2.2 * dt * ko, 2.2 * dt * ko);
       if (c.ut === null && c.dir > 0 && c.s > UT_S - 30) target = Math.min(target, 5);
-      const brakeV = free < 0 ? 0 : Math.sqrt(2 * 5 * Math.max(0, free));
+      const brakeV = free < 0 ? 0 : Math.min(Math.sqrt(2 * 5 * Math.max(0, free)), 1.5 + free / 1.3);
       target = Math.min(target, brakeV);
+      if (c.crashT > 0) { target = 0; c.crashT = Math.max(0, c.crashT - dt); }
+      setHazard(c, c.crashT > 0, t);
       c.v += Math.max(-8 * dt, Math.min(2.5 * dt, target - c.v));
       if (c.v < 0) c.v = 0;
-      c.stall = c.v < 0.2 && !(c.rest && !c.rest.done) ? c.stall + dt : 0;
+      c.stall = c.v < 0.2 && !(c.rest && !c.rest.done) && !(c.crashT > 0) ? c.stall + dt : 0;
       if (c.stall > STALL_MAX) respawnFar(c, rigPts[0]);
       if (c.ut !== null) {
         c.ut += (c.v * dt) / UT_R;
-        if (c.ut >= Math.PI) { c.ut = null; c.dir = -1; c.s = UT_S; c.o = -3.5; c.rest = null; }
+        if (c.ut >= Math.PI) { c.ut = null; c.dir = -1; c.s = UT_S; c.o = -3.5; c.rest = null; c.hl = c.len > 8 ? 1 : (r() < 0.5 ? 0 : 1); }
       } else {
         c.s += c.v * c.dir * dt;
         if (c.dir > 0 && c.s >= UT_S) { c.s = UT_S; c.ut = 0; }
@@ -364,19 +495,19 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
         const ns = 200 + r() * (UT_S - 260), nd = r() < 0.5 ? 1 : -1, Q = hwAt(ns, nd * 3.5);
         if (Math.hypot(Q.x - me.x, Q.z - me.z) > 160 && !allCars().some((o) => Math.hypot(o.g.position.x - Q.x, o.g.position.z - Q.z) < 20)) {
           cars.splice(cars.indexOf(c), 1); hwCars.push(c);
-          Object.assign(c, { hw: true, ut: null, dir: nd, s: ns, v: 8, vmax: 15 + r() * 5, turn: null, stall: 0, o: nd * 3.5, rest: null });
+          Object.assign(c, { hw: true, ut: null, dir: nd, s: ns, v: 8, vmax: c.len > 8 ? 12 + r() * 2 : 15 + r() * 5, turn: null, stall: 0, o: nd * LANES[1], hl: 1, rest: null, crashT: 0 });
           c.g.rotation.order = 'YXZ'; c.g.position.set(Q.x, Q.y, Q.z);
         }
       }
     }
     for (const c of toHw) {
       cars.splice(cars.indexOf(c), 1); hwCars.push(c);
-      Object.assign(c, { hw: true, ut: null, dir: 1, s: Math.max(0, c.s - CITY_SIZE), vmax: 15 + r() * 5, turn: null, stall: 0, o: 3.5, rest: null });
+      Object.assign(c, { hw: true, ut: null, dir: 1, s: Math.max(0, c.s - CITY_SIZE), vmax: c.len > 8 ? 12 + r() * 2 : 15 + r() * 5, turn: null, stall: 0, o: 3.5, hl: 1, rest: null, plan: null });
       c.g.rotation.order = 'YXZ';
     }
     for (const c of toCity) {
       hwCars.splice(hwCars.indexOf(c), 1); cars.push(c);
-      Object.assign(c, { hw: false, ut: null, axis: 'x', line: -80, dir: -1, s: CITY_SIZE + c.s, turn: null, passed: null, vmax: 10 + r() * 4, stall: 0 });
+      Object.assign(c, { hw: false, ut: null, axis: 'x', line: -80, dir: -1, s: CITY_SIZE + c.s, turn: null, passed: null, vmax: 10 + r() * 4, stall: 0, lane: 1, lo: LANES[1], plan: null, yaw: 0 });
       c.g.rotation.x = 0;
     }
     ALL = cars.concat(hwCars);
@@ -507,5 +638,7 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
   }
   function positions() { return allCars().map((c) => c.g.position).concat(fleetPositions()); }
   function setVisible(v) { allCars().forEach((c) => (c.g.visible = v)); for(const item of managedFleet.values()) item.g.visible=v && item.unit && (item.unit.status==='outbound'||item.unit.status==='returning'); }
-  return { update, circles, positions, setVisible, syncFleet, updateFleet, fleetPositions, fleetObject };
+  // 小地圖用：拋錨／事故車的位置
+  function incidents() { return allCars().filter((c) => c.crashT > 0).map((c) => c.g.position); }
+  return { update, circles, positions, setVisible, syncFleet, updateFleet, fleetPositions, fleetObject, crash, incidents };
 }

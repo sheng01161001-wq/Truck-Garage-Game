@@ -97,7 +97,9 @@ export function lightState(t, axis) {
   const xs = p < 15 ? 'r' : p < 27 ? 'g' : 'y';
   return axis === 'z' ? zs : xs;
 }
-export function hasLight(cx, cz) { return Math.abs(cx) === 80 && Math.abs(cz) === 80; }
+// v23：市中心 4×4 的路口（±80、±240）都有紅綠燈
+export const LIGHT_LINES = [-240, -80, 80, 240];
+export function hasLight(cx, cz) { return LIGHT_LINES.includes(cx) && LIGHT_LINES.includes(cz); }
 export function updateTrafficLights(t) {
   for (const axis of ['z', 'x']) {
     const s = lightState(t, axis), m = tlMats[axis];
@@ -187,6 +189,19 @@ export function buildWorld(scene, quality) {
   for (const line of ROADS) for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i] + (ROADS.includes(stops[i]) ? ROAD_W / 2 : 0), b = stops[i + 1] - (ROADS.includes(stops[i + 1]) ? ROAD_W / 2 : 0);
     addSeg('z', line, a, b); addSeg('x', line, a, b);
+  }
+  // v23：每個方向兩條車道，中間畫白色虛線
+  {
+    const spots = [];
+    for (const line of ROADS) for (const side of [-1, 1]) for (let a = -455; a <= 455; a += 9) {
+      if (ROADS.some((r) => Math.abs(a - r) < ROAD_W / 2 + 4)) continue;
+      spots.push([line + side * 3.5, a, 'z'], [a, line + side * 3.5, 'x']);
+    }
+    const dg = new THREE.BoxGeometry(0.15, 0.02, 3);
+    const dm = new THREE.InstancedMesh(dg, stdMat({ color: 0xf0f0ec, roughness: 0.7 }), spots.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+    spots.forEach(([x, z, ax], i) => { q.setFromAxisAngle(up, ax === 'z' ? 0 : Math.PI / 2); m4.compose(new THREE.Vector3(x, 0.035, z), q, one); dm.setMatrixAt(i, m4); });
+    dm.receiveShadow = true; root.add(dm);
   }
   const ig = new THREE.PlaneGeometry(ROAD_W, ROAD_W); ig.rotateX(-Math.PI / 2);
   for (const x of ROADS) for (const z of ROADS) mesh(ig, roadMat.plain, x, 0.025, z, root, { cast: false });
@@ -504,7 +519,7 @@ export function buildWorld(scene, quality) {
   }
   const tlPole = stdMat({ color: 0x444a50, roughness: 0.5, metalness: 0.6 });
   const lens = new THREE.CylinderGeometry(0.16, 0.16, 0.08, 14).rotateX(Math.PI / 2);
-  for (const cx of [-80, 80]) for (const cz of [-80, 80]) {
+  for (const cx of LIGHT_LINES) for (const cz of LIGHT_LINES) {
     for (const [dx, dz, ry, axis] of [[-8.5, -8.5, 0, 'z'], [8.5, 8.5, Math.PI, 'z'], [-8.5, 8.5, Math.PI / 2, 'x'], [8.5, -8.5, -Math.PI / 2, 'x']]) {
       const g = new THREE.Group(); g.position.set(cx + dx, 0, cz + dz); g.rotation.y = ry; root.add(g);
       mesh(new THREE.CylinderGeometry(0.12, 0.15, 6, 8), tlPole, 0, 3, 0, g);

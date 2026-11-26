@@ -1,8 +1,8 @@
-// 卡車改裝王 v22（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v23（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
-  setWet, setNight, lampPositions, updateTrafficLights, setShowroomLights,
+  setWet, setNight, lampPositions, updateTrafficLights, setShowroomLights, ROADS, hasLight, lightState,
 } from './js/world.js';
 import { buildRig, setTruckLights } from './js/truck.js';
 import { createEnv } from './js/env.js';
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v22';
+const VERSION = 'v23';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -105,7 +105,7 @@ function loadSave() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { s = null; }
   const out = { coins: 500, owned: [], deliveries: 0, truck: { ...DEFAULT_TRUCK }, fleet: [], company: { name: '小棒槌物流', trucks: 1, engineLevel: 0, fuelLevel: 0, revenue: 0, expenses: 0, contracts: 0, wages: 0, maintenance: 0, fuelCost: 0, fleetLog: [], queuedCargo: null, fleetUnits: [] }, fuel: 1, damage: 0, dirt: 0.15,
-    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'low' : 'high' } };
+    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'low' : 'high', traffic: 'normal' } };
   if (s && typeof s === 'object') {
     if (Number.isFinite(s.coins) && s.coins >= 0) out.coins = Math.floor(s.coins);
     if (Array.isArray(s.owned)) out.owned = s.owned.filter((x) => typeof x === 'string');
@@ -137,6 +137,7 @@ function loadSave() {
       if (['day', 'dusk', 'night'].includes(s.settings.time)) out.settings.time = s.settings.time;
       if (['clear', 'rain', 'fog'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
       if (['high', 'low'].includes(s.settings.quality)) out.settings.quality = s.settings.quality;
+      if (['few', 'normal', 'many'].includes(s.settings.traffic)) out.settings.traffic = s.settings.traffic;
     }
   }
   return out;
@@ -165,7 +166,9 @@ const camera = new THREE.PerspectiveCamera(55, 1, 0.3, 3000);
 const env = createEnv(renderer, scene);
 if (!HIGH) env.sun.shadow.mapSize.set(1024, 1024);
 buildWorld(scene, save.settings.quality);
-const traffic = createTraffic(scene, HIGH ? 22 : 14, HIGH ? 8 : 5);
+// 車流密度：少／中／多（多的時候路口會塞車）
+const DENSITY = { few: [10, 4], normal: [HIGH ? 22 : 14, HIGH ? 8 : 5], many: [HIGH ? 38 : 26, HIGH ? 12 : 8] }[save.settings.traffic] || [14, 5];
+const traffic = createTraffic(scene, DENSITY[0], DENSITY[1]);
 
 // 晚上：在卡車附近的路燈放真的燈光（最多 6 盞）
 const lampLights = [];
@@ -412,12 +415,13 @@ function renderEnvPanel() {
   const b = (kind, id, label) => `<button class="opt ${save.settings[kind] === id ? 'sel' : ''}" data-kind="${kind}" data-id="${id}">${label}</button>`;
   $('#envBody').innerHTML = `<div class="e-sec">時間</div><div class="opts">${Object.entries(TIME_N).map(([k, v]) => b('time', k, v)).join('')}</div>
     <div class="e-sec">天氣</div><div class="opts">${Object.entries(WEATHER_N).map(([k, v]) => b('weather', k, v)).join('')}</div>
+    <div class="e-sec">車流（換了會重新載入）</div><div class="opts">${b('traffic', 'few', '少')}${b('traffic', 'normal', '中')}${b('traffic', 'many', '多（會塞車）')}</div>
     <div class="e-sec">畫質（換了會重新載入）</div><div class="opts">${b('quality', 'high', '高（電腦）')}${b('quality', 'low', '順（手機平板）')}</div>`;
 }
 $('#envBody').addEventListener('click', (e) => {
   const o = e.target.closest('.opt'); if (!o) return;
   const { kind, id } = o.dataset;
-  if (kind === 'quality') { if (save.settings.quality !== id) { save.settings.quality = id; persist(); location.reload(); } return; }
+  if (kind === 'quality' || kind === 'traffic') { if (save.settings[kind] !== id) { save.settings[kind] = id; persist(); location.reload(); } return; }
   save.settings[kind] = id; S.lightsManual = false; persist(); applyEnv(); renderEnvPanel();
 });
 $('#envClose').onclick = () => $('#envPanel').classList.add('hidden');
@@ -881,6 +885,7 @@ function drive(dt) {
       save.damage = clamp(save.damage + dmg, 0, 1); S.bumpsThisJob++;
       Snd.thud(clamp(impact / 12, 0.3, 1)); S.shake = Math.min(1.2, impact / 10);
       toast(hit.car ? `撞到車了！車損 +${Math.round(dmg * 100)}%` : `碰撞！車損 +${Math.round(dmg * 100)}%`, 1300);
+      if (hit.car && impact > 4) traffic.crash(hit.car, 25); // 被撞的車停在路邊閃故障燈
     }
     S.v = -S.v * 0.2;
   }
@@ -928,10 +933,31 @@ function drive(dt) {
     S.hint = `加油中… ${Math.round(save.fuel * 100)}%`;
   }
   restService(dt, stopped);
+  redLightCheck();
   // 方向燈自動回正
   if ((S.ind === 'L' || S.ind === 'R') && Math.abs(S.steer) > 0.25) S.indArmed = true;
   if (S.indArmed && Math.abs(S.steer) < 0.05) { S.ind = null; S.indArmed = false; refreshButtons(); }
   Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel, inside: S.cam === 2 });
+}
+
+// 紅綠燈：前面紅燈會提醒；紅燈還開過路口就跳「闖紅燈」
+function redLightCheck() {
+  if (!inCity(S.x, S.z) || S.y > 2.5) { S.rlCross = null; return; }
+  const fx = Math.sin(S.heading), fz = Math.cos(S.heading), axis = Math.abs(fx) > Math.abs(fz) ? 'x' : 'z';
+  const along = axis === 'x' ? S.x : S.z, cross = axis === 'x' ? S.z : S.x, d = (axis === 'x' ? fx : fz) > 0 ? 1 : -1;
+  const line = ROADS.find((r) => Math.abs(cross - r) < 8);
+  if (line === undefined) { S.rlCross = null; return; }
+  // 前面最近的有燈路口
+  let next = null;
+  for (const r of ROADS) { const ds = (r - along) * d; if (ds > -8 && ds < 60 && (next === null || ds < (next - along) * d)) next = r; }
+  if (next === null) { S.rlCross = null; return; }
+  const cx = axis === 'x' ? next : line, cz = axis === 'x' ? line : next;
+  if (!hasLight(cx, cz)) return;
+  const ds = (next - along) * d, st = lightState(S.time, axis);
+  if (st === 'r' && ds > 8 && ds < 45 && !S.hint && Math.abs(S.v) > 1) S.hint = '🚦 前面紅燈，請停在路口前';
+  const inside = ds < 7 && ds > -7, key = cx + ',' + cz;
+  if (inside && S.rlCross !== key) { S.rlCross = key; if (st === 'r' && Math.abs(S.v) > 3) { toast('🚦 闖紅燈了！要等綠燈喔', 1800); Snd.no(); } }
+  if (!inside && S.rlCross === key && ds < -7) S.rlCross = null;
 }
 
 // 收費站：車頭經過收費亭扣過路費；太快會提醒減速
@@ -1059,7 +1085,7 @@ function updateHud(dt) {
     fuel: save.fuel, temp: S.temp, damage: save.damage, indL: S.ind === 'L' || S.ind === 'H', indR: S.ind === 'R' || S.ind === 'H', blink: S.blink,
     lights: S.lights, wipers: S.wipers, brake: input.down || Math.abs(S.v) < 0.05, engineWarn: save.damage > 0.6 || save.fuel <= 0, tons: tons ? tons + 8 : 8,
   });
-  drawMinimap(mapCv, { x: S.x, z: S.z, heading: S.heading, route: S.route, target: m ? missionTarget() : null, time: S.time, night: env.state.night > 0.5, cars: traffic.positions(), selectedFleet: S.followFleetId ? traffic.fleetObject(S.followFleetId)?.position : null });
+  drawMinimap(mapCv, { x: S.x, z: S.z, heading: S.heading, route: S.route, target: m ? missionTarget() : null, time: S.time, night: env.state.night > 0.5, cars: traffic.positions(), incidents: traffic.incidents(), selectedFleet: S.followFleetId ? traffic.fleetObject(S.followFleetId)?.position : null });
 }
 
 // ================= 主迴圈 =================
