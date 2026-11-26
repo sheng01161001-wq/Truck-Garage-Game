@@ -15,9 +15,12 @@ function spur(x, z) { return 45 * Math.exp(-(((z + 265) / 38) ** 2)) * sm((x - (
 export function naturalHeight(x, z) {
   const d = Math.max(Math.abs(x), Math.abs(z));
   const t = clamp((d - (CITY + 60)) / 520, 0, 1);
-  if (t <= 0) return 0;
+  if (t <= 0) return x < -CITY - 8 ? -9 * sm((-CITY - 8 - x) / 60) : 0;
   const ridge = N.fbm(x / 420 + 10, z / 420 - 3, 5), hills = N.fbm(x / 110, z / 110, 3);
-  return t * t * (90 + ridge * 520) + t * hills * 45 + spur(x, z);
+  const h = t * t * (90 + ridge * 520) + t * hills * 45 + spur(x, z);
+  // v27：西邊是海（市區西邊外面變成海灘、海底）
+  if (x < -CITY - 8) return Math.min(h, -9 * sm((-CITY - 8 - x) / 60));
+  return h;
 }
 
 // ---------- 路線：直線＋圓弧 ----------

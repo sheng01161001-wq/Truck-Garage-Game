@@ -36,6 +36,7 @@ export const DEPOTS = [
   { name: '北城倉庫', emoji: '🏬', x: -80, z: -425, bx: -80, bz: -448, color: '#607d8b', kind: 'shop' },
   { name: '東區冷鏈倉', emoji: '❄️', x: 425, z: 80, bx: 448, bz: 80, color: '#388eaa', kind: 'shop' },
   { name: '南郊配送站', emoji: '🚚', x: 80, z: 425, bx: 80, bz: 448, color: '#9b7b35', kind: 'shop' },
+  { name: '貨櫃碼頭', emoji: '⚓', x: -425, z: 160, bx: -448, bz: 160, color: '#0d47a1', kind: 'quay' }, // v27：西邊海港
   LUMBER, // 山上林場（走國道、過收費站和隧道）
 ];
 export const GAS = { x: -58, z: 30, name: '加油站' };
@@ -100,6 +101,18 @@ export function lightState(t, axis) {
 // v23：市中心 4×4 的路口（±80、±240）都有紅綠燈
 export const LIGHT_LINES = [-240, -80, 80, 240];
 export function hasLight(cx, cz) { return LIGHT_LINES.includes(cx) && LIGHT_LINES.includes(cz); }
+// v27：會動的東西（海浪、風車、煙囪的煙）
+const anim = { sea: null, blades: [], smoke: [] };
+export function updateWorldAnim(t, dt) {
+  if (anim.sea) { anim.sea.offset.set(t * 0.012, t * 0.008); }
+  for (const b of anim.blades) b.rotation.z = t * 0.9 + b.userData.ph;
+  for (const p of anim.smoke) {
+    p.userData.life += dt;
+    const k = (p.userData.life % 9) / 9;
+    p.position.set(p.userData.x + k * 14, p.userData.y + k * 26, p.userData.z + k * 4);
+    const sc = 2.5 + k * 9; p.scale.set(sc, sc, sc); p.material.opacity = 0.42 * (1 - k);
+  }
+}
 export function updateTrafficLights(t) {
   for (const axis of ['z', 'x']) {
     const s = lightState(t, axis), m = tlMats[axis];
@@ -140,6 +153,38 @@ export function buildWorld(scene, quality) {
   photoDetail(groundMat, 'aerial_grass_rock', 72, 72, 0.6);
   wetMats.push({ mat: groundMat, dry: 0.95, wet: 0.6, dryColor: new THREE.Color(1, 1, 1), wetColor: new THREE.Color(0.75, 0.78, 0.75) });
   const ground = mesh(new THREE.PlaneGeometry(1080, 1080), groundMat, 0, 0, 0, root, { cast: false }); ground.rotation.x = -Math.PI / 2;
+
+  // ---------- v27：西邊的海、沙灘、貨輪 ----------
+  {
+    const nt = canvasTex(256, 256, (c, w, h) => {
+      const img = c.createImageData(w, h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const a = Math.sin(x / w * Math.PI * 8 + Math.sin(y / h * Math.PI * 6) * 1.5), b = Math.cos(y / h * Math.PI * 10 + Math.sin(x / w * Math.PI * 4));
+        const i = (y * w + x) * 4; img.data[i] = 128 + a * 40; img.data[i + 1] = 128 + b * 40; img.data[i + 2] = 255; img.data[i + 3] = 255;
+      }
+      c.putImageData(img, 0, 0);
+    }, { srgb: false, repeat: true });
+    nt.repeat.set(60, 60); anim.sea = nt;
+    const seaMat = new THREE.MeshPhysicalMaterial({ color: 0x1f5c7a, roughness: 0.12, metalness: 0.05, normalMap: nt, normalScale: new THREE.Vector2(0.35, 0.35), clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 1.2 });
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(2600, 3200), seaMat); sea.rotation.x = -Math.PI / 2; sea.position.set(-472 - 1300, 0.05, 0); sea.receiveShadow = true; root.add(sea);
+    const sandM = stdMat({ map: gravelTex([206, 190, 150]), roughness: 1 }); sandM.map.repeat.set(4, 120);
+    const beach = new THREE.Mesh(new THREE.PlaneGeometry(14, 1080), sandM); beach.rotation.x = -Math.PI / 2; beach.position.set(-466, 0.035, 0); beach.receiveShadow = true; root.add(beach);
+    const wallM = stdMat({ map: concreteTex(), color: 0xb8b3a8, roughness: 0.9 });
+    mesh(new THREE.BoxGeometry(1.2, 1.2, 1080), wallM, -472.6, 0.2, 0, root);
+    // 貨輪（停在碼頭外面）
+    const hullM = stdMat({ color: 0x1b2a3a, roughness: 0.6, metalness: 0.3 }), redM = stdMat({ color: 0x8e1b1b, roughness: 0.7 }), whiteM = stdMat({ color: 0xeeeeee, roughness: 0.5 });
+    const ctx2 = ['#b03a2e', '#1f618d', '#239b56', '#d4ac0d', '#7d3c98', '#ca6f1e', '#e5e7e9'].map((c, i) => { const t = corrugatedTex(c, i + 9); t.repeat.set(3, 1); return stdMat({ map: t, roughness: 0.55, metalness: 0.35 }); });
+    const cgeo = new THREE.BoxGeometry(2.5, 2.6, 12);
+    for (const [sx, sz, len] of [[-508, 160, 120], [-640, -120, 150]]) {
+      const ship = new THREE.Group(); ship.position.set(sx, 0, sz); root.add(ship);
+      mesh(new THREE.BoxGeometry(24, 9, len), hullM, 0, 2.5, 0, ship);
+      mesh(new THREE.BoxGeometry(24.2, 2.2, len + 0.2), redM, 0, -0.6, 0, ship);
+      mesh(new THREE.CylinderGeometry(12, 12, 9, 24, 1, false, 0, Math.PI), hullM, 0, 2.5, len / 2, ship).rotation.y = -Math.PI / 2;
+      mesh(new THREE.BoxGeometry(20, 14, 12), whiteM, 0, 14, -len / 2 + 10, ship);
+      mesh(new THREE.BoxGeometry(22, 1, 4), whiteM, 0, 21.5, -len / 2 + 10, ship);
+      for (let i = 0; i < 7; i++) for (let row = 0; row < Math.floor(len / 14) - 2; row++) for (let k = 0; k < 2 + Math.floor(R() * 3); k++) mesh(cgeo, ctx2[Math.floor(R() * ctx2.length)], -7.5 + i * 2.55, 8.3 + k * 2.6, -len / 2 + 22 + row * 13, ship, { cast: k === 0 });
+    }
+  }
 
   // ---------- 區域入口指示牌 ----------
   const signEntries = [
@@ -323,6 +368,28 @@ export function buildWorld(scene, quality) {
       for (const [x, z] of [[-292, 185], [-292, 197], [-276, 185], [-276, 197]]) mesh(new THREE.BoxGeometry(0.8, 28, 0.8), crane, x, 14, z, root);
       mesh(new THREE.BoxGeometry(22, 1.5, 1.2), crane, -284, 28, 185, root); mesh(new THREE.BoxGeometry(22, 1.5, 1.2), crane, -284, 28, 197, root);
       mesh(new THREE.BoxGeometry(1.2, 1.5, 34), crane, -284, 30, 191, root);
+    } else if (d.kind === 'quay') {
+      // 貨櫃碼頭：岸邊橋式起重機、貨櫃堆場
+      const cc = ['#b03a2e', '#1f618d', '#239b56', '#d4ac0d', '#7d3c98', '#ca6f1e', '#566573', '#e5e7e9'];
+      const cg = new THREE.BoxGeometry(2.5, 2.6, 12);
+      const ctex = cc.map((c, i) => { const t = corrugatedTex(c, i + 3); t.repeat.set(3, 1); return stdMat({ map: t, roughness: 0.55, metalness: 0.35 }); });
+      for (const [x0, z0] of [[-440, 106], [-440, 214]]) {
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 1 + Math.floor(R() * 3); k++) mesh(cg, ctex[Math.floor(R() * cc.length)], x0 + i * 3, 1.3 + k * 2.6, z0 + j * 13, root);
+        addBox(x0 + 4.5, z0 + 6.5, 13, 27);
+      }
+      const crane = stdMat({ color: 0x1565c0, roughness: 0.55, metalness: 0.45 }), white = stdMat({ color: 0xf2f2f2, roughness: 0.5 });
+      for (const cz of [140, 182]) {
+        for (const [lx, lz] of [[-451, cz - 6], [-451, cz + 6], [-461, cz - 6], [-461, cz + 6]]) { mesh(new THREE.BoxGeometry(1.1, 34, 1.1), crane, lx, 17, lz, root); addBox(lx, lz, 1.4, 1.4); }
+        for (const lz of [cz - 6, cz + 6]) mesh(new THREE.BoxGeometry(70, 2.2, 1.4), crane, -470, 34, lz, root); // 伸到海上的吊臂
+        mesh(new THREE.BoxGeometry(6, 3, 13.4), white, -456, 31, cz, root);
+        const tro = mesh(new THREE.BoxGeometry(3, 1.6, 4), stdMat({ color: 0x263238 }), -490, 32.2, cz, root);
+        mesh(new THREE.CylinderGeometry(0.05, 0.05, 18, 6), stdMat({ color: 0x222222 }), -490, 23, cz, root);
+        mesh(cg, ctex[Math.floor(R() * cc.length)], -490, 13, cz, root).rotation.y = Math.PI / 2;
+      }
+      const bt = boardTex('⚓ 貨櫃碼頭', '#0d47a1', '#ffffff', 1024, 160);
+      const bm = stdMat({ map: bt, emissiveMap: bt, emissive: 0xffffff, emissiveIntensity: 0.15 }); nightMats.push({ mat: bm, on: 1.3 });
+      const sg = new THREE.Group(); sg.position.set(-412, 0, 146); sg.rotation.y = Math.PI / 2; root.add(sg);
+      mesh(new THREE.BoxGeometry(8, 1.4, 0.15), bm, 0, 4.4, 0, sg); for (const px of [-3, 3]) mesh(new THREE.CylinderGeometry(0.1, 0.12, 4.4, 8), stdMat({ color: 0x8a9096 }), px, 2.2, 0, sg);
     } else if (d.kind === 'farm') {
       shed(d.bx, d.bz, 18, 9, 14, '#8e2b1f', ry, label, d.color);
       const silo = stdMat({ color: 0xcfd3d6, roughness: 0.4, metalness: 0.7 });
@@ -330,10 +397,29 @@ export function buildWorld(scene, quality) {
       const ft = fieldTex(); ft.repeat.set(4, 2);
       const fm = stdMat({ map: ft, roughness: 1 });
       for (const [x, z] of [[105, -280], [215, -282], [118, -205], [205, -205]]) { const f = mesh(new THREE.PlaneGeometry(36, 26), fm, x, 0.03, z, root, { cast: false }); f.rotation.x = -Math.PI / 2; }
+      // v27：風力發電機（葉片會轉）
+      const tw = stdMat({ color: 0xf4f6f7, roughness: 0.35, metalness: 0.2 });
+      const bladeG = new THREE.BoxGeometry(0.9, 17, 0.25); bladeG.translate(0, 8.5, 0);
+      for (const [x, z] of [[120, -436], [168, -442], [214, -434]]) {
+        mesh(new THREE.CylinderGeometry(0.9, 1.6, 44, 16), tw, x, 22, z, root); addBox(x, z, 3.4, 3.4);
+        mesh(new THREE.BoxGeometry(2.2, 2.2, 5), tw, x, 44.5, z + 0.8, root);
+        const hub = new THREE.Group(); hub.position.set(x, 44.5, z - 2); hub.userData.ph = x; root.add(hub);
+        for (let k = 0; k < 3; k++) { const b = new THREE.Mesh(bladeG, tw); b.rotation.z = (k * Math.PI * 2) / 3; b.castShadow = true; hub.add(b); }
+        anim.blades.push(hub);
+      }
     } else if (d.kind === 'factory') {
       shed(d.bx + 2, d.bz, 30, 13, 18, '#9aa4ad', ry, label, d.color);
       const ch = stdMat({ color: 0x7b7d80, roughness: 0.8 });
-      for (const z of [d.bz - 24, d.bz + 24]) { mesh(new THREE.CylinderGeometry(1.2, 1.5, 30, 16), ch, d.bx + 4, 15, z, root); mesh(new THREE.CylinderGeometry(1.25, 1.25, 1.5, 16), stdMat({ map: stripeTex('#c62828', '#eeeeee', 6) }), d.bx + 4, 28, z, root); addBox(d.bx + 4, z, 3, 3); }
+      for (const z of [d.bz - 24, d.bz + 24]) { mesh(new THREE.CylinderGeometry(1.2, 1.5, 30, 16), ch, d.bx + 4, 15, z, root); mesh(new THREE.CylinderGeometry(1.25, 1.25, 1.5, 16), stdMat({ map: stripeTex('#c62828', '#eeeeee', 6) }), d.bx + 4, 28, z, root); addBox(d.bx + 4, z, 3, 3);
+        // v27：煙囪冒煙
+        const smokeTex = canvasTex(64, 64, (c, w, h) => { const g = c.createRadialGradient(32, 32, 2, 32, 32, 30); g.addColorStop(0, 'rgba(235,235,235,1)'); g.addColorStop(1, 'rgba(235,235,235,0)'); c.fillStyle = g; c.fillRect(0, 0, w, h); });
+        for (let k = 0; k < 7; k++) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, depthWrite: false, opacity: 0.4 })); sp.userData = { x: d.bx + 4, y: 31, z, life: k * 1.3 }; root.add(sp); anim.smoke.push(sp); }
+      }
+      // v27：儲槽、管線架
+      const tank = stdMat({ color: 0xdfe3e6, roughness: 0.35, metalness: 0.6 });
+      for (const [tx, tz] of [[d.bx + 22, d.bz - 40], [d.bx + 22, d.bz - 52]]) { mesh(new THREE.CylinderGeometry(5, 5, 9, 28), tank, tx, 4.5, tz, root); addBox(tx, tz, 10, 10); }
+      const pipe = stdMat({ color: 0xb0792f, roughness: 0.5, metalness: 0.6 });
+      for (let k = 0; k < 3; k++) { const pp = mesh(new THREE.CylinderGeometry(0.35, 0.35, 30, 10), pipe, d.bx + 14, 5 + k * 0.9, d.bz - 32, root); pp.rotation.z = Math.PI / 2; pp.rotation.y = Math.PI / 2; }
     } else if (d.kind === 'site') {
       shed(d.bx, d.bz - 4, 14, 7, 10, '#c9b18b', ry, label, d.color);
       GRAVEL_ZONES.push({ x: d.x - 30, z: d.z - 6, w: 34, d: 40 });

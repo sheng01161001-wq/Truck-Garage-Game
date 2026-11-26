@@ -1,8 +1,8 @@
-// 卡車改裝王 v26（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v27（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
-  setWet, setNight, lampPositions, updateTrafficLights, setShowroomLights, ROADS, hasLight, lightState,
+  setWet, setNight, lampPositions, updateTrafficLights, updateWorldAnim, setShowroomLights, ROADS, hasLight, lightState,
 } from './js/world.js';
 import { buildRig, setTruckLights } from './js/truck.js';
 import { createEnv } from './js/env.js';
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v26';
+const VERSION = 'v27';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -429,7 +429,7 @@ function toggleSound() { Snd.init(); Snd.setMuted(!Snd.muted); $('#bSound').firs
 function refreshButtons() {
   $('#cL').classList.toggle('on', S.ind === 'L'); $('#cR').classList.toggle('on', S.ind === 'R'); $('#cH').classList.toggle('on', S.ind === 'H');
   $('#cLights').classList.toggle('on', S.lights); $('#cWipers').classList.toggle('on', S.wipers);
-  $('#cRet').classList.toggle('on', S.retarder);
+  $('#cRet')?.classList.toggle('on', S.retarder); // 舊版網頁快取沒有這顆按鈕時不要當掉
 }
 $('#bGarage').onclick = () => openGarage();
 $('#bCam').onclick = () => switchCam();
@@ -437,7 +437,7 @@ $('#bReset').onclick = () => resetTruck();
 $('#bSound').onclick = () => toggleSound();
 $('#bEnv').onclick = () => { $('#envPanel').classList.toggle('hidden'); renderEnvPanel(); };
 $('#cL').onclick = () => setIndicator('L'); $('#cR').onclick = () => setIndicator('R'); $('#cH').onclick = () => setIndicator('H');
-$('#cLights').onclick = () => toggleLights(); $('#cWipers').onclick = () => toggleWipers(); $('#cHorn').onclick = () => honk(); $('#cRet').onclick = () => toggleRetarder();
+$('#cLights').onclick = () => toggleLights(); $('#cWipers').onclick = () => toggleWipers(); $('#cHorn').onclick = () => honk(); if ($('#cRet')) $('#cRet').onclick = () => toggleRetarder();
 let coinTaps = [];
 $('#coins').addEventListener('click', () => {
   const now = performance.now(); coinTaps = coinTaps.filter((t) => now - t < 3000); coinTaps.push(now);
@@ -1287,6 +1287,7 @@ function frame(dt) {
   if (rig.rainbowGlow) { const c = new THREE.Color().setHSL((S.time * 0.5) % 1, 1, 0.55); rig.glowMat.color.copy(c); rig.glowLight.color.copy(c); }
   // 紅綠燈、車流、路燈光
   updateTrafficLights(S.time);
+  updateWorldAnim(S.time, dt);
   const pts = rigPoints(S.x, S.z, S.heading, S.trailerHeading);
   // 卡車在高架橋上時，橋下的車不用讓它（把卡車位置移到很遠的地方給車流看）
   const tPts = S.y > 2.5 && inCity(S.x, S.z) ? pts.map((p) => ({ ...p, x: p.x + 5000 })) : pts;
