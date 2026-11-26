@@ -136,7 +136,8 @@ export function drawCluster(cv, d) {
   bar(ctx, W / 2 - 70, H - 18, 140, '水溫', d.temp, '#4aa3ff', d.temp > 0.9);
   bar(ctx, W - 180, H - 18, 150, '車損', d.damage, '#ffb020', d.damage > 0.7);
   ctx.fillStyle = '#7f8c99'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(`載重 ${d.tons} 噸`, mx, 168);
+  ctx.fillText(`總重 ${d.tons} 噸${d.retarder ? '　排氣煞車' : ''}`, mx, 168);
+  if (d.brakeTemp > 0.3) { ctx.fillStyle = d.brakeTemp > 0.6 ? '#ff5a5a' : '#ffb020'; ctx.fillText(`煞車溫度 ${Math.round(80 + d.brakeTemp * 420)}°C`, mx, 150); }
   ctx.fillStyle = d.kmh > d.speedLimit + 1 ? '#ff5a5a' : '#a9c4d8'; ctx.font = 'bold 12px sans-serif';
   ctx.fillText(`速限 ${d.speedLimit} km/h${d.brakeTemp > 0.5 ? '　煞車溫度偏高' : ''}${d.rollover ? '　側翻救援：按 R' : ''}`, mx, 190);
 }

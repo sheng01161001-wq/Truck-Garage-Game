@@ -1,4 +1,4 @@
-// 卡車改裝王 v24（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v25（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v24';
+const VERSION = 'v25';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -35,7 +35,7 @@ const CATALOG = {
   ] },
   trailerType: { title: '車斗種類', items: [
     { id: 'box', name: '廂型貨櫃', icon: '📦', price: 0 },
-    { id: 'flat', name: '平板車', icon: '🪜', price: 200 },
+    { id: 'flat', name: '平板車', icon: '🚚', price: 200 },
     { id: 'dump', name: '砂石斗', icon: '⛰️', price: 300 },
   ] },
   paint: { title: '烤漆種類', items: [
@@ -180,7 +180,7 @@ const S = {
   v: 0, steer: 0, thr: 0, brk: 0, gear: 1, shiftT: 0, rpm: 600, revHold: 0,
   wheelAngle: 0, travelled: 0, roll: 0, rollV: 0, pitch: 0, pitchV: 0, bump: 0, lastV: 0, suspension: 0, suspensionV: 0, brakeTemp: 0, speedLimit: 50, rollover: false, rolloverWarned: false,
   lights: false, ind: null, blinkT: 0, blink: false, indArmed: false, wipers: false, wiperT: 0,
-  cam: 0, camYaw: 0, camYawT: 0, shake: 0, cine: null,
+  cam: 0, camYaw: 0, camYawT: 0, shake: 0, cine: null, retarder: true, slip: 0, jackT: 0,
   gAng: 0.9, gDrag: null, gTab: 'model', pending: null, gRadius: 11, gHeight: 4.2, gAutoRotate: true, gFocus: { x: 0, y: 2.4, z: 0 },
   mission: null, hint: '', time: 0, temp: 0.5, hornT: 0, bumpsThisJob: 0, loadT: 0,
   route: null, routeT: 0, dirtDrawn: save.dirt, fuelCoinAcc: 0, wasStopped: true, lastSurface: 'road',
@@ -290,6 +290,8 @@ function newMission(fromIdx = null, cargoIdx = null) {
   if (rig) rig.setLoaded(false);
 }
 function missionTarget() { const m = S.mission; return DEPOTS[m.stage === 'pickup' ? m.from : m.to]; }
+// 車斗：空車重量（噸）、重心係數（廂型車斗高、平板車低）
+const TRAILER_PHYS = { box: { empty: 7.5, cg: 1.1 }, flat: { empty: 6, cg: 0.85 }, dump: { empty: 9, cg: 1.0 } };
 function cargoTons() { return S.mission && S.mission.stage === 'deliver' ? S.mission.tons : 0; }
 function checkMission(dt) {
   const m = S.mission; if (!m) return;
@@ -304,6 +306,8 @@ function checkMission(dt) {
     if (m.stage === 'pickup') {
       m.stage = 'deliver'; S.bumpsThisJob = 0; rig.setLoaded(true); S.route = null;
       Snd.coin(); popup(`${m.cargo.split(' ')[0]} 裝好了！${m.tons} 噸`);
+      const TRp = TRAILER_PHYS[save.truck.trailerType] || TRAILER_PHYS.box;
+      toast(m.tons >= 20 || TRp.cg > 1.05 ? `載了 ${m.tons} 噸、重心比較高：轉彎和下坡要慢慢開` : `載了 ${m.tons} 噸：煞車距離會變長喔`, 2600);
     } else {
       const bonus = S.bumpsThisJob === 0 ? Math.round(m.reward * 0.25) : 0;
       const fleetGross = Math.max(0, save.company.trucks - 1) * 120;
@@ -341,6 +345,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'KeyT') cycleEnv('time');
   else if (k === 'KeyY') cycleEnv('weather');
   else if (k === 'KeyM') toggleSound();
+  else if (k === 'KeyJ') toggleRetarder();
 });
 window.addEventListener('keyup', (e) => { if (KEYMAP[e.code]) input[KEYMAP[e.code]] = false; });
 function releaseAll() { for (const k in input) input[k] = false; document.querySelectorAll('.tc').forEach((b) => b.classList.remove('on')); }
@@ -371,6 +376,8 @@ function updateCoins() { $('#coinNum').textContent = save.coins; $('#gCoins').te
 function honk() { Snd.init(); if (S.hornT > 0) return; S.hornT = 0.4; Snd.horn(save.truck.horn); }
 function toggleLights() { S.lights = !S.lights; S.lightsManual = true; Snd.click(); refreshButtons(); }
 function toggleWipers() { S.wipers = !S.wipers; Snd.click(); refreshButtons(); }
+// 排氣煞車（引擎煞車）：放開油門時幫忙減速，下坡比較不用一直踩煞車
+function toggleRetarder() { S.retarder = !S.retarder; Snd.click(); refreshButtons(); toast(S.retarder ? '🛑 排氣煞車：開' : '排氣煞車：關', 1000); }
 function setIndicator(k) { S.ind = S.ind === k ? null : k; S.blinkT = 0; S.indArmed = false; refreshButtons(); }
 const CAM_NAMES = ['追車鏡頭', '高空鏡頭', '駕駛座', '路邊轉播'];
 function switchCam() { S.followFleetId = null; S.cam = (S.cam + 1) % 4; S.camYaw = 0; S.cine = null; toast('📷 ' + CAM_NAMES[S.cam], 1000); }
@@ -382,6 +389,7 @@ function toggleSound() { Snd.init(); Snd.setMuted(!Snd.muted); $('#bSound').firs
 function refreshButtons() {
   $('#cL').classList.toggle('on', S.ind === 'L'); $('#cR').classList.toggle('on', S.ind === 'R'); $('#cH').classList.toggle('on', S.ind === 'H');
   $('#cLights').classList.toggle('on', S.lights); $('#cWipers').classList.toggle('on', S.wipers);
+  $('#cRet').classList.toggle('on', S.retarder);
 }
 $('#bGarage').onclick = () => openGarage();
 $('#bCam').onclick = () => switchCam();
@@ -389,7 +397,7 @@ $('#bReset').onclick = () => resetTruck();
 $('#bSound').onclick = () => toggleSound();
 $('#bEnv').onclick = () => { $('#envPanel').classList.toggle('hidden'); renderEnvPanel(); };
 $('#cL').onclick = () => setIndicator('L'); $('#cR').onclick = () => setIndicator('R'); $('#cH').onclick = () => setIndicator('H');
-$('#cLights').onclick = () => toggleLights(); $('#cWipers').onclick = () => toggleWipers(); $('#cHorn').onclick = () => honk();
+$('#cLights').onclick = () => toggleLights(); $('#cWipers').onclick = () => toggleWipers(); $('#cHorn').onclick = () => honk(); $('#cRet').onclick = () => toggleRetarder();
 let coinTaps = [];
 $('#coins').addEventListener('click', () => {
   const now = performance.now(); coinTaps = coinTaps.filter((t) => now - t < 3000); coinTaps.push(now);
@@ -804,7 +812,10 @@ function hitTest(x, z, h, th) {
 function drive(dt) {
   S.hint = '';
   if (S.rollover) { S.v = 0; S.thr = 0; S.hint = '翻車了！按 🔄（或 R）回到改裝廠'; return; }
-  const tons = cargoTons(), mass = 16500 + tons * 1000;
+  // v25：車斗種類決定空車重量和重心高度；貨越重、重心越高
+  const tons = cargoTons(), TR = TRAILER_PHYS[save.truck.trailerType] || TRAILER_PHYS.box;
+  const mass = 9000 + TR.empty * 1000 + tons * 1000;
+  const cg = TR.cg * (1 + tons / 70); // 1＝一般；越大越容易翻
   const surf = surfaceAt(S.x, S.z); S.lastSurface = surf;
   const wet = env.state.wet;
   const loadGrip = clamp(1 - tons * 0.0035, 0.88, 1);
@@ -847,17 +858,20 @@ function drive(dt) {
   const dir = Math.sign(S.v);
   const resist = crr * mass * 9.81 + 3.3 * S.v * S.v + (accelPedal < 0.05 ? 0.035 * mass * Math.min(1, Math.abs(S.v)) : 0);
   let a = F / mass - dir * resist / mass - 9.81 * S.grade; // 上坡變慢、下坡變快
+  // 排氣煞車：放開油門時在中高轉速幫忙減速（重車更明顯），下坡用它控速
+  if (S.retarder && !rev && accelPedal < 0.05 && S.v > 3) a -= Math.min(1.4, 0.35 + S.rpm / 2400) * (0.6 + 0.4 * Math.min(1, tons / 20));
   const legalSpeed = S.speedLimit / 3.6;
   if (!rev && S.v > legalSpeed) a -= Math.min(2.8, (S.v - legalSpeed) * 1.35); // 依道路速限進行引擎煞車，不突然鎖死車速
   if (!rev && S.v > VMAX + save.company.engineLevel * 0.7 + 0.3) a -= (S.v - (VMAX + save.company.engineLevel * 0.7)) * 1.5;
   if (rev && S.v < -5) a += (-5 - S.v) * 1.5; // 倒車下坡也不會越倒越快
   // 煞車：重車煞車距離比較長
   const fade = 1 - clamp((S.brakeTemp - 0.45) * 0.62, 0, 0.38);
-  const brakeDecel = brakePedal * 5.8 * grip * (1 - tons / 90) * fade;
+  const brakeDecel = brakePedal * 5.2 * grip * (1 - tons / 65) * fade; // 重車煞車距離長：滿載大約是空車的 1.6 倍
   S.v += a * dt;
   if (brakeDecel > 0) { const dv = brakeDecel * dt; S.v = Math.abs(S.v) <= dv ? 0 : S.v - Math.sign(S.v) * dv; }
   // 長時間重煞車會累積煞車溫度；放開煞車後逐漸冷卻，熱衰退會降低制動力。
-  S.brakeTemp = clamp(S.brakeTemp + (brakePedal * (Math.abs(S.v) / 24) * 0.22 - 0.035) * dt, 0, 1);
+  S.brakeTemp = clamp(S.brakeTemp + (brakePedal * (Math.abs(S.v) / 24) * 0.22 * (0.7 + mass / 60000) - 0.035) * dt, 0, 1); // 越重越容易熱
+  if (S.brakeTemp > 0.6 && brakePedal > 0) S.hint = S.retarder ? '🔥 煞車太燙了！放開煞車讓它涼一下' : '🔥 煞車太燙了！打開「排氣煞車」下坡比較不用踩煞車';
   if (Math.abs(S.v) < 0.05 && accelPedal < 0.05) S.v = 0;
   // 氣壓煞車「嘶」：剛停下來
   const stopped = Math.abs(S.v) < 0.05;
@@ -870,9 +884,22 @@ function drive(dt) {
   S.steer += clamp(target - S.steer, -rate * dt, rate * dt);
 
   const px = S.x, pz = S.z, ph = S.heading, pth = S.trailerHeading;
-  S.heading += (S.v / L) * Math.tan(S.steer) * grip * dt;
+  // 輪胎抓地力有上限：太快轉太急會推頭打滑（下雨、碎石路、載重時更早打滑）
+  let yawRate = (S.v / L) * Math.tan(S.steer) * grip;
+  const latMax = 7.5 * grip; // 公尺/秒²
+  const latNow = Math.abs(yawRate * S.v);
+  S.slip = latNow > latMax ? Math.min(1, (latNow - latMax) / latMax) : Math.max(0, S.slip - dt * 2);
+  if (latNow > latMax && Math.abs(S.v) > 1) yawRate *= latMax / latNow;
+  if (S.slip > 0.15 && !S.hint) S.hint = wet ? '🌧 路滑打滑了！慢一點再轉' : '輪胎打滑了！慢一點再轉';
+  S.heading += yawRate * dt; S.yawRate = yawRate;
   S.x += Math.sin(S.heading) * S.v * dt; S.z += Math.cos(S.heading) * S.v * dt;
   S.trailerHeading += (S.v / LT) * Math.sin(S.heading - S.trailerHeading) * dt;
+  // 折刀（拖車甩尾）：濕地或打滑時重踩煞車又在轉彎，拖車會往外甩
+  const relJ = wrapAngle(S.heading - S.trailerHeading);
+  if (brakePedal > 0.6 && Math.abs(S.v) > 11 && grip < 0.9 && Math.abs(S.steer) > 0.08) {
+    S.jackT += dt; S.trailerHeading -= Math.sign(relJ || S.steer) * 0.5 * Math.min(1, S.jackT) * dt;
+    if (S.jackT > 0.6 && !S.hint) S.hint = '⚠️ 拖車快甩尾了！放開煞車、把方向盤回正';
+  } else S.jackT = Math.max(0, S.jackT - dt * 2);
   const rel = wrapAngle(S.heading - S.trailerHeading);
   if (Math.abs(rel) > 1.35) S.trailerHeading = S.heading - Math.sign(rel) * 1.35;
 
@@ -902,10 +929,10 @@ function drive(dt) {
   const dist = Math.abs(S.v) * dt;
   S.travelled += dist; S.wheelAngle += (S.v * dt) / RW;
   // 車身側傾、點頭（彈簧＋阻尼）
-  const aLat = (S.v * S.v * Math.tan(S.steer) * grip) / L;
+  const aLat = (S.yawRate || 0) * S.v; // 實際的側向力（打滑時輪胎抓不住，力量有上限：空車會滑、不會翻）
   const aLong = (S.v - S.lastV) / Math.max(dt, 1e-3); S.lastV = S.v;
   // 翻車：轉彎太快（載越重越容易）先提醒，持續太快才會翻；車身只微微側傾
-  const risk = Math.abs(aLat) * (1 + tons / 40);
+  const risk = Math.abs(aLat) * (1 + tons / 40) * cg;
   S.tipT = risk > 14 ? (S.tipT || 0) + dt : Math.max(0, (S.tipT || 0) - dt * 2);
   if (risk > 10) S.hint = '轉彎太快了，慢一點，小心翻車！';
   const rollT = clamp(aLat * 0.016 * (1 + tons / 40), -0.1, 0.1) * (1 + S.tipT * 2), pitchT = clamp(-aLong * 0.008, -0.05, 0.05);
@@ -933,6 +960,7 @@ function drive(dt) {
     S.hint = `加油中… ${Math.round(save.fuel * 100)}%`;
   }
   restService(dt, stopped);
+  if (wet && Math.abs(S.v) > 16 && !S.hint) S.hint = '🌧 下雨路滑：煞車距離變長，跟前車保持距離';
   redLightCheck();
   // 方向燈自動回正
   if ((S.ind === 'L' || S.ind === 'R') && Math.abs(S.steer) > 0.25) S.indArmed = true;
@@ -1083,7 +1111,7 @@ function updateHud(dt) {
   drawCluster(clusterCv, {
     rpm: S.rpm, kmh: Math.abs(S.v) * 3.6, speedLimit: S.speedLimit, brakeTemp: S.brakeTemp, rollover: S.rollover, gear: S.gear < 0 ? 'R' : (Math.abs(S.v) < 0.05 && S.thr < 0.05 ? 'N' : 'A' + S.gear),
     fuel: save.fuel, temp: S.temp, damage: save.damage, indL: S.ind === 'L' || S.ind === 'H', indR: S.ind === 'R' || S.ind === 'H', blink: S.blink,
-    lights: S.lights, wipers: S.wipers, brake: input.down || Math.abs(S.v) < 0.05, engineWarn: save.damage > 0.6 || save.fuel <= 0, tons: tons ? tons + 8 : 8,
+    lights: S.lights, wipers: S.wipers, brake: input.down || Math.abs(S.v) < 0.05, engineWarn: save.damage > 0.6 || save.fuel <= 0, tons: Math.round(9 + (TRAILER_PHYS[save.truck.trailerType] || TRAILER_PHYS.box).empty + tons), retarder: S.retarder,
   });
   drawMinimap(mapCv, { x: S.x, z: S.z, heading: S.heading, route: S.route, target: m ? missionTarget() : null, time: S.time, night: env.state.night > 0.5, cars: traffic.positions(), incidents: traffic.incidents(), selectedFleet: S.followFleetId ? traffic.fleetObject(S.followFleetId)?.position : null });
 }
