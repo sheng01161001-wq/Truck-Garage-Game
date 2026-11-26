@@ -140,6 +140,7 @@ body.touch #mission { max-width: 46vw; }
 .mirror-frame { display: none; position: fixed; z-index: 4; border: 3px solid #1b1d21; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.12); pointer-events: none; }
 .mirror-frame span { position: absolute; left: 6px; top: 4px; font-size: 11px; color: rgba(255,255,255,.85); text-shadow: 0 1px 3px #000; }
 body.cab-view .mirror-frame { display: block; }
+body.no-mirrors .mirror-frame { display: none !important; }
 body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: none; }
 /* v28：接單板、送貨收據 */
 #jobPanel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 30; width: min(680px, 94vw); max-height: 88vh; overflow: auto; background: rgba(12,16,22,.96); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.6); color: #e8edf2; padding: 16px; }
@@ -166,6 +167,30 @@ body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: non
 .fin-bar i.up { background: linear-gradient(#80e0a5, #2e9d5b); } .fin-bar i.down { background: linear-gradient(#ff9b9b, #c0392b); }
 .fin-bar small { font-size: 9px; color: #9eacb9; margin-top: 3px; white-space: nowrap; }
 #windshieldDrops { position: fixed; inset: 0; z-index: 3; pointer-events: none; display: none; }
+/* v31：主選單、成就、設定、教學 */
+.t-stats { margin: 6px 0 12px; color: #f7c66b; font-weight: 800; font-size: 16px; min-height: 20px; }
+.menu-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.mbtn { padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(20,28,38,.85); color: #e8edf2; font-size: 15px; font-weight: 800; cursor: pointer; }
+.mbtn:hover { background: #2b3a4c; }
+#menuPanel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40; width: min(560px, 94vw); max-height: 88vh; overflow: auto; background: rgba(12,16,22,.97); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.6); color: #e8edf2; padding: 16px; }
+#menuPanel.hidden, #tutBox.hidden, #fpsBox.hidden { display: none; }
+.mp-head { display: flex; justify-content: space-between; align-items: center; font-size: 20px; font-weight: 900; margin-bottom: 12px; }
+.mp-head button { background: #263241; color: #fff; border: 0; border-radius: 10px; padding: 8px 12px; font-size: 15px; cursor: pointer; }
+.mp-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.mp-tabs button { padding: 8px 12px; border-radius: 10px; border: 1px solid #3a4652; background: #1a2530; color: #e8edf2; font-weight: 800; cursor: pointer; }
+.mp-tabs button.sel { background: linear-gradient(135deg,#ffd47a,#e99a2b); color: #15191e; border-color: #ffd47a; }
+.ach { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; background: #17222e; margin-bottom: 6px; }
+.ach .ic { font-size: 24px; width: 32px; text-align: center; } .ach.locked { opacity: .55; } .ach.locked .ic { filter: grayscale(1); }
+.ach b { display: block; font-size: 15px; } .ach small { color: #aebbc7; } .ach .rw { margin-left: auto; color: #f7c66b; font-weight: 800; white-space: nowrap; }
+.set-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,.07); font-size: 15px; }
+.set-row .opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.set-row input[type=range] { width: 180px; accent-color: #f2b84e; }
+.big-act { display: block; width: 100%; margin: 8px 0; padding: 12px; border-radius: 12px; border: 0; font-size: 16px; font-weight: 900; cursor: pointer; background: #263746; color: #fff; }
+.big-act.gold { background: linear-gradient(135deg,#ffd77f,#e99a2b); color: #17191c; } .big-act.red { background: #5a1f22; color: #ffc4c4; }
+#tutBox { position: fixed; left: 50%; top: 96px; transform: translateX(-50%); z-index: 22; max-width: min(560px, 92vw); background: rgba(20,40,70,.92); border: 2px solid #ffd47a; border-radius: 16px; padding: 12px 16px; color: #fff; font-size: 18px; font-weight: 800; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.45); pointer-events: auto; }
+#tutBox small { display: block; font-size: 13px; color: #cfe0ff; font-weight: 600; margin-top: 4px; }
+#tutBox button { margin-top: 8px; background: transparent; color: #ffd47a; border: 1px solid #ffd47a; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+#fpsBox { position: fixed; left: 8px; bottom: 16px; z-index: 6; font: 12px monospace; color: #9be7b0; background: rgba(0,0,0,.45); padding: 2px 6px; border-radius: 6px; pointer-events: none; }
 #ver { position: fixed; left: 8px; bottom: 2px; font-size: 11px; color: rgba(255,255,255,.4); z-index: 5; pointer-events: none; }
 
 
@@ -248,3 +273,5 @@ body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: non
 
 /* J：車隊品牌識別、個別塗裝與營運成本 */
 .fleet-custom-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.fleet-custom-row label{display:grid;gap:5px;color:#aebbc7;font-size:11px}.fleet-custom-row select,.fleet-custom-row input{width:100%;min-width:0;padding:8px 9px;border:1px solid #435565;border-radius:8px;background:#101a23;color:#f2f5f8;font-size:12px}.fleet-custom-row select{cursor:pointer}.dispatch-top>span{max-width:52%;text-align:right}@media(max-width:560px){.fleet-custom-row{grid-template-columns:1fr}}
+/* v31：上方按鈕變多了，螢幕窄的時候只留圖示，不要壓到任務欄 */
+@media (max-width: 1100px) { .top-right .tbtn span { display: none; } .top-right .tbtn { width: 46px; height: 46px; font-size: 20px; } }

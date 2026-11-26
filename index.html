@@ -35,7 +35,14 @@
       <div><kbd>C</kbd> 換鏡頭　<kbd>T</kbd> 換時間　<kbd>Y</kbd> 換天氣　<kbd>G</kbd> 改裝廠</div>
       <div class="tip">平板手機用畫面上的按鈕。跟著小地圖的<b>橘色導航線</b>開，停進黃色<b>裝卸區</b>就會自動裝貨、卸貨。</div>
     </div>
+    <div id="tStats" class="t-stats"></div>
     <button id="startBtn" class="btn-big" disabled>發動引擎</button>
+    <div class="menu-row">
+      <button class="mbtn" data-menu="tutorial">🎓 新手教學</button>
+      <button class="mbtn" data-menu="ach">🏆 成就</button>
+      <button class="mbtn" data-menu="settings">⚙️ 設定</button>
+      <button class="mbtn" data-menu="save">💾 存檔</button>
+    </div>
     <div id="loadMsg" class="load">載入中…</div>
   </div>
 </div>
@@ -56,6 +63,7 @@
     <button id="bCam" class="tbtn">📷<span>鏡頭</span></button>
     <button id="bReset" class="tbtn">🔄<span>回廠</span></button>
     <button id="bSound" class="tbtn">🔊<span>聲音</span></button>
+    <button id="bMenu" class="tbtn">☰<span>選單</span></button>
   </div>
   <canvas id="minimap" width="220" height="220"></canvas>
   <div id="controls">
@@ -69,6 +77,11 @@
   </div>
   <canvas id="cluster" width="520" height="230"></canvas>
 </div>
+
+<!-- v31：選單（成就、設定、存檔）、新手教學提示 -->
+<div id="menuPanel" class="hidden"><div id="menuBody"></div></div>
+<div id="tutBox" class="hidden"></div>
+<div id="fpsBox" class="hidden"></div>
 
 <!-- v28：接單板／送貨收據 -->
 <div id="jobPanel" class="hidden"><div id="jobBody"></div></div>

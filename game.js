@@ -1,4 +1,4 @@
-// 卡車改裝王 v30（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v31（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v30';
+const VERSION = 'v31';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -145,7 +145,7 @@ function loadSave() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { s = null; }
   const out = { coins: 500, owned: [], deliveries: 0, truck: { ...DEFAULT_TRUCK }, fleet: [], company: { name: '小棒槌物流', trucks: 1, engineLevel: 0, fuelLevel: 0, revenue: 0, expenses: 0, contracts: 0, wages: 0, maintenance: 0, fuelCost: 0, fleetLog: [], queuedCargo: null, fleetUnits: [] }, fuel: 1, damage: 0, dirt: 0.15,
-    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'low' : 'high', traffic: 'normal' } };
+    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'low' : 'high', traffic: 'normal', volume: 1, post: true, mirrors: true, fps: false }, ach: [], flags: {} };
   if (s && typeof s === 'object') {
     if (Number.isFinite(s.coins) && s.coins >= 0) out.coins = Math.floor(s.coins);
     if (Array.isArray(s.owned)) out.owned = s.owned.filter((x) => typeof x === 'string');
@@ -164,6 +164,8 @@ function loadSave() {
       if (Array.isArray(c.fleetUnits)) out.company.fleetUnits = c.fleetUnits.slice(0, 7).filter(u => u && typeof u.id === 'string').map((u,i) => ({ id:u.id.slice(0,48), name:String(u.name||`車隊 ${i+1}`).slice(0,16), driver:String(u.driver||'待指派司機').slice(0,16), paint:/^#[0-9a-f]{6}$/i.test(u.paint)?u.paint:['#b71c1c','#145da0','#d18a16','#315b45'][i%4], plate:String(u.plate||`BK-${String(i+1).padStart(3,'0')}`).replace(/[^a-zA-Z0-9-]/g,'').slice(0,10), status:['idle','outbound','returning'].includes(u.status)?u.status:'idle', progress:clamp(Number(u.progress)||0,0,1), duration:clamp(Number(u.duration)||90,45,180), fuel:clamp(Number(u.fuel??1),0,1), condition:clamp(Number(u.condition??1),0,1), cargoIndex:Number.isInteger(u.cargoIndex)?clamp(u.cargoIndex,0,11):null, origin:Number.isInteger(u.origin)?clamp(u.origin,0,DEPOTS.length-1):null, destination:Number.isInteger(u.destination)?clamp(u.destination,0,DEPOTS.length-1):null, reward:Math.max(0,Math.floor(Number(u.reward)||0)), earned:Math.max(0,Math.floor(Number(u.earned)||0)), phase:['outbound','unloading','returning'].includes(u.phase)?u.phase:'outbound', stopTimer:clamp(Number(u.stopTimer)||0,0,20), driverState:String(u.driverState||'待命').slice(0,16), fatigue:clamp(Number(u.fatigue)||0,0,1), incidents:Math.max(0,Math.floor(Number(u.incidents)||0)), lastEvent:String(u.lastEvent||'車輛已完成檢查').slice(0,48), eventChecked:!!u.eventChecked, model:['light','std','heavy'].includes(u.model)?u.model:'std', skill:clamp(Math.floor(Number(u.skill)||1),1,3) }));
     }
     if (Number.isFinite(s.deliveries)) out.deliveries = s.deliveries;
+    if (Array.isArray(s.ach)) out.ach = s.ach.filter((x) => typeof x === 'string').slice(0, 60); // v31 成就
+    if (s.flags && typeof s.flags === 'object') { out.flags = {}; for (const [k, v] of Object.entries(s.flags)) if (typeof v === 'boolean' || Number.isFinite(v)) out.flags[k] = v; }
     if (s.jobs && typeof s.jobs === 'object') out.jobs = { done: Math.max(0, Math.floor(Number(s.jobs.done) || 0)), stars: Math.max(0, Math.floor(Number(s.jobs.stars) || 0)) }; // v28 任務評價紀錄
     for (const k of ['fuel', 'damage', 'dirt']) if (Number.isFinite(s[k])) out[k] = clamp(s[k], 0, 1);
     if (s.truck && typeof s.truck === 'object') {
@@ -181,6 +183,8 @@ function loadSave() {
       if (['clear', 'rain', 'fog', 'snow'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
       if (['high', 'low'].includes(s.settings.quality)) out.settings.quality = s.settings.quality;
       if (['few', 'normal', 'many'].includes(s.settings.traffic)) out.settings.traffic = s.settings.traffic;
+      if (Number.isFinite(s.settings.volume)) out.settings.volume = clamp(s.settings.volume, 0, 1);
+      for (const k of ['post', 'mirrors', 'fps']) if (typeof s.settings[k] === 'boolean') out.settings[k] = s.settings[k];
     }
   }
   return out;
@@ -449,6 +453,10 @@ function checkMission(dt) {
       stars = clamp(stars, 1, 5);
       save.coins += payout; save.deliveries++;
       save.jobs = save.jobs || { done: 0, stars: 0 }; save.jobs.done++; save.jobs.stars += stars; addHistory('送貨', payout);
+      // v31：成就用的紀錄
+      const fl = save.flags = save.flags || {}, dk = DEPOTS[m.to].kind;
+      if (stars === 5) fl.star5 = true; if (dk === 'lumber') fl.lumber = true; if (dk === 'quay') fl.quay = true;
+      if (env.state.night > 0.7) fl.night = true; if (env.state.snow) fl.snow = true; if (m.tons >= 24) fl.heavy = true;
       save.company.revenue += m.reward + bonus + timeBonus + fleetGross;
       save.company.expenses += fleetCost; save.company.contracts++;
       persist(); updateCoins();
@@ -1316,7 +1324,7 @@ const baseFov = () => { const portrait = window.innerWidth < window.innerHeight;
 
 // ================= v24：畫面後製（高畫質才開）：環境光遮蔽（角落陰影）、發光、邊緣平滑 =================
 let post = null;
-if (HIGH) {
+if (HIGH && save.settings.post !== false) {
   Promise.all([
     import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'),
     import('three/addons/postprocessing/GTAOPass.js'), import('three/addons/postprocessing/UnrealBloomPass.js'),
@@ -1359,7 +1367,8 @@ const mirrorReady = [false, false];
 function renderMirrors() {
   const show = S.mode === 'drive' && S.cam === 2 && !inGarage() && !S.followFleetId;
   document.body.classList.toggle('cab-view', show);
-  if (!show || !rig.mirrorLocal) return;
+  document.body.classList.toggle('no-mirrors', save.settings.mirrors === false);
+  if (!show || !rig.mirrorLocal || save.settings.mirrors === false) return;
   const H = window.innerHeight, every = HIGH ? 2 : 3;
   mirrorTick++;
   const auto = renderer.autoClear, shadowAuto = renderer.shadowMap.autoUpdate;
@@ -1432,7 +1441,9 @@ const clock = new THREE.Clock();
 const focus = new THREE.Vector3();
 let lampT = 0;
 function loop() {
-  frame(Math.min(clock.getDelta(), 0.05));
+  const raw = clock.getDelta();
+  if (raw < 0.2) perfTick(raw); // 切到別的分頁回來那一格不算
+  frame(Math.min(raw, 0.05));
   requestAnimationFrame(loop);
 }
 function frame(dt) {
@@ -1461,6 +1472,7 @@ function frame(dt) {
   updateTrafficLights(S.time);
   updateWorldAnim(S.time, dt);
   updateDayCycle(dt);
+  updateMeta(dt);
   const pts = rigPoints(S.x, S.z, S.heading, S.trailerHeading);
   // 卡車在高架橋上時，橋下的車不用讓它（把卡車位置移到很遠的地方給車流看）
   const tPts = S.y > 2.5 && inCity(S.x, S.z) ? pts.map((p) => ({ ...p, x: p.x + 5000 })) : pts;
@@ -1493,6 +1505,147 @@ function frame(dt) {
   renderMirrors();
 }
 
+// ================= v31：成就、新手教學、設定／存檔選單、效能自動調整 =================
+const ACH = [
+  { id: 'first', ic: '🚚', n: '第一趟', d: '完成第一趟送貨', rw: 100, ok: () => save.deliveries >= 1 },
+  { id: 'ten', ic: '📦', n: '小小運輸員', d: '送貨 10 趟', rw: 300, ok: () => save.deliveries >= 10 },
+  { id: 'fifty', ic: '🏅', n: '運輸達人', d: '送貨 50 趟', rw: 1200, ok: () => save.deliveries >= 50 },
+  { id: 'star5', ic: '⭐', n: '五星司機', d: '拿到一次五顆星評價', rw: 200, ok: () => save.flags?.star5 },
+  { id: 'lumber', ic: '🌲', n: '上山送貨', d: '把貨送到山上林場（要過收費站和隧道）', rw: 300, ok: () => save.flags?.lumber },
+  { id: 'quay', ic: '⚓', n: '港口卡車', d: '把貨送到貨櫃碼頭', rw: 200, ok: () => save.flags?.quay },
+  { id: 'heavy', ic: '🏋️', n: '大力士', d: '載 24 噸以上送達', rw: 250, ok: () => save.flags?.heavy },
+  { id: 'night', ic: '🌙', n: '夜班司機', d: '晚上送達一趟', rw: 200, ok: () => save.flags?.night },
+  { id: 'snow', ic: '❄️', n: '雪地老手', d: '下雪天送達一趟', rw: 300, ok: () => save.flags?.snow },
+  { id: 'cab', ic: '🚘', n: '真正的司機', d: '用駕駛座視角開 1 公里', rw: 200, ok: () => (save.flags?.cabDist || 0) >= 1000 },
+  { id: 'mod', ic: '🔧', n: '改裝入門', d: '買第一個改裝零件', rw: 100, ok: () => save.owned.length >= 1 },
+  { id: 'mod10', ic: '🎨', n: '改裝狂', d: '買 10 個改裝零件', rw: 500, ok: () => save.owned.length >= 10 },
+  { id: 'fleet', ic: '🚛', n: '開公司', d: '買第一台營運卡車', rw: 300, ok: () => save.company.trucks >= 2 },
+  { id: 'hire3', ic: '👷', n: '挖角高手', d: '雇用一位三星司機', rw: 300, ok: () => save.company.fleetUnits.some((u) => u.skill >= 3) },
+  { id: 'wh', ic: '🏬', n: '物流中心', d: '蓋好倉庫', rw: 300, ok: () => (save.company.warehouse || 0) >= 1 },
+  { id: 'rich', ic: '💰', n: '小富翁', d: '金幣累積到 10000', rw: 500, ok: () => save.coins >= 10000 },
+];
+let metaT = 0, fpsEma = 1 / 60, fpsShowT = 0, prBase = renderer.getPixelRatio(), pr = prBase, prT = 0;
+function updateMeta(dt) {
+  // 駕駛座里程
+  if (S.mode === 'drive' && S.cam === 2) { save.flags = save.flags || {}; save.flags.cabDist = (save.flags.cabDist || 0) + Math.abs(S.v) * dt; }
+  updateTutorial(dt);
+  metaT += dt; if (metaT < 1.5 || S.mode !== 'drive') return; metaT = 0; // 開車時才跳成就
+  save.ach = save.ach || [];
+  for (const a of ACH) if (!save.ach.includes(a.id) && a.ok()) {
+    save.ach.push(a.id); save.coins += a.rw; persist(); updateCoins(); Snd.buy();
+    toast(`🏆 達成成就「${a.n}」！獎勵 +${a.rw} 金幣`, 3200); break; // 一次跳一個，比較看得清楚
+  }
+}
+// 效能：真實的每格時間（不是遊戲的 dt），太慢就降低解析度、夠快再調回來
+function perfTick(realDt) {
+  fpsEma = fpsEma * 0.95 + realDt * 0.05;
+  if (save.settings.fps) { fpsShowT -= realDt; if (fpsShowT <= 0) { fpsShowT = 0.5; $('#fpsBox').textContent = `${Math.round(1 / fpsEma)} FPS｜解析度 ${Math.round(pr / prBase * 100)}%`; } }
+  $('#fpsBox').classList.toggle('hidden', !save.settings.fps);
+  if (S.mode === 'title') return;
+  prT += realDt; if (prT < 2) return;
+  if (fpsEma > 1 / 28 && pr > Math.max(0.6, prBase * 0.55)) { pr = Math.max(0.6, pr - 0.1); prT = 0; applyPR(); }
+  else if (fpsEma < 1 / 50 && pr < prBase && prT > 6) { pr = Math.min(prBase, pr + 0.1); prT = 0; applyPR(); }
+}
+function applyPR() { renderer.setPixelRatio(pr); if (post) post.composer.setPixelRatio(Math.min(pr, 1.5)); resize(); }
+// ---- 新手教學 ----
+const TUT = [
+  { t: '按住 ↑（平板按右下「油門」）往前開', ok: () => S.v > 3 },
+  { t: '按 ← →（平板按「方向盤」）轉個彎', ok: () => (S.tutTurn || 0) > 1.2 },
+  { t: '按 ↓（平板按「煞車」）把車停下來', ok: () => S.tutMoved && Math.abs(S.v) < 0.3 },
+  { t: '跟著小地圖上的橘色導航線，開到黃色裝卸區停好，就會自動裝貨', ok: () => S.mission && S.mission.stage === 'deliver', sub: '上面的箭頭也會告訴你往哪轉' },
+  { t: '裝好了！現在把貨送到目的地，停進黃色框就會卸貨', ok: () => save.deliveries > (S.tutStartDel ?? 0), sub: '轉彎和下坡要慢慢開，貨物才不會壞' },
+];
+function startTutorial() { S.tut = 0; S.tutTurn = 0; S.tutMoved = false; S.tutStartDel = save.deliveries; save.flags = save.flags || {}; save.flags.tutSeen = true; persist(); showTut(); }
+function showTut() {
+  const box = $('#tutBox');
+  if (S.tut == null) { box.classList.add('hidden'); return; }
+  const st = TUT[S.tut];
+  box.innerHTML = `🎓 第 ${S.tut + 1}／${TUT.length} 步：${st.t}${st.sub ? `<small>${st.sub}</small>` : ''}<br><button id="tutSkip">跳過教學</button>`;
+  box.classList.remove('hidden');
+}
+function updateTutorial(dt) {
+  if (S.tut == null || S.mode !== 'drive') return;
+  if (Math.abs(S.steer) > 0.2 && Math.abs(S.v) > 2) S.tutTurn += dt;
+  if (Math.abs(S.v) > 4) S.tutMoved = true;
+  if (TUT[S.tut].ok()) {
+    S.tut++; Snd.coin();
+    if (S.tut >= TUT.length) { S.tut = null; save.coins += 200; persist(); updateCoins(); popup('🎓 教學完成！+200'); toast('🎉 你已經會開大卡車了！之後按上方「📋 接單」挑你想送的貨', 4000); }
+    showTut();
+  }
+}
+$('#tutBox').addEventListener('click', (e) => { if (e.target.closest('#tutSkip')) { S.tut = null; showTut(); Snd.click(); } });
+// ---- 選單：成就、設定、存檔 ----
+let menuTab = 'ach';
+function renderTitleStats() {
+  const j = save.jobs || { done: 0, stars: 0 };
+  $('#tStats').textContent = save.deliveries ? `💰 ${save.coins.toLocaleString()}｜送貨 ${save.deliveries} 趟${j.done ? `｜平均 ⭐ ${(j.stars / j.done).toFixed(1)}` : ''}｜成就 ${(save.ach || []).length}／${ACH.length}` : '';
+}
+function openMenu(tab) { menuTab = tab; renderMenu(); $('#menuPanel').classList.remove('hidden'); Snd.click(); }
+function closeMenu() { $('#menuPanel').classList.add('hidden'); renderTitleStats(); }
+function renderMenu() {
+  const tabs = [['ach', '🏆 成就'], ['settings', '⚙️ 設定'], ['save', '💾 存檔'], ['help', '🎓 操作說明']];
+  let h = `<div class="mp-head"><span>選單</span><button id="mpClose">關閉</button></div><div class="mp-tabs">${tabs.map(([k, n]) => `<button data-mtab="${k}" class="${menuTab === k ? 'sel' : ''}">${n}</button>`).join('')}</div>`;
+  const opt = (k, v, label) => `<button class="opt ${save.settings[k] === v ? 'sel' : ''}" data-set="${k}" data-val="${v}">${label}</button>`;
+  if (menuTab === 'ach') {
+    const got = save.ach || [];
+    h += `<div class="studio-note">完成成就會拿到金幣獎勵（${got.length}／${ACH.length}）</div>` + ACH.map((a) => `<div class="ach ${got.includes(a.id) ? '' : 'locked'}"><span class="ic">${a.ic}</span><div><b>${a.n}${got.includes(a.id) ? ' ✅' : ''}</b><small>${a.d}</small></div><span class="rw">💰 ${a.rw}</span></div>`).join('');
+  } else if (menuTab === 'settings') {
+    h += `<div class="set-row"><span>音量</span><input type="range" min="0" max="100" value="${Math.round((save.settings.volume ?? 1) * 100)}" data-vol></div>
+      <div class="set-row"><span>畫質（換了會重新載入）</span><div class="opts">${opt('quality', 'high', '高（電腦）')}${opt('quality', 'low', '順（手機平板）')}</div></div>
+      <div class="set-row"><span>光影後製（高畫質才有）</span><div class="opts">${opt('post', true, '開')}${opt('post', false, '關（比較順）')}</div></div>
+      <div class="set-row"><span>車流</span><div class="opts">${opt('traffic', 'few', '少')}${opt('traffic', 'normal', '中')}${opt('traffic', 'many', '多')}</div></div>
+      <div class="set-row"><span>駕駛座後照鏡</span><div class="opts">${opt('mirrors', true, '開')}${opt('mirrors', false, '關')}</div></div>
+      <div class="set-row"><span>顯示 FPS（畫面順不順）</span><div class="opts">${opt('fps', true, '開')}${opt('fps', false, '關')}</div></div>
+      <div class="studio-note">畫面太卡時，遊戲會自動把解析度調低一點，順了再調回來。</div>`;
+  } else if (menuTab === 'save') {
+    h += `<div class="studio-note">遊戲會自動存檔在這台裝置上。要換電腦或平板玩，先「匯出存檔」，到新的裝置再「匯入存檔」。</div>
+      <button class="big-act gold" data-act="export">📤 匯出存檔（下載檔案）</button>
+      <label class="big-act" style="text-align:center">📥 匯入存檔<input type="file" accept=".json,application/json" data-act="import" style="display:none"></label>
+      <button class="big-act red" data-act="reset">🗑 重新開始新遊戲（全部歸零）</button>`;
+  } else {
+    h += `<div class="howto"><div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 油門／煞車（停住後按住＝倒車）／方向盤</div>
+      <div><kbd>Q</kbd><kbd>E</kbd> 方向燈　<kbd>L</kbd> 大燈　<kbd>K</kbd> 雨刷　<kbd>H</kbd> 喇叭　<kbd>J</kbd> 排氣煞車</div>
+      <div><kbd>C</kbd> 換鏡頭（追車／高空／駕駛座／路邊）　<kbd>G</kbd> 改裝廠　<kbd>R</kbd> 回廠</div>
+      <div class="tip">平板手機用畫面上的按鈕。跟著橘色導航線開，停進黃色裝卸區就會自動裝貨、卸貨。按「📋 接單」挑想送的貨。</div></div>
+      <button class="big-act gold" data-act="tutorial">🎓 重新開始新手教學</button>`;
+  }
+  $('#menuBody').innerHTML = h;
+}
+$('#menuBody').addEventListener('click', (e) => {
+  if (e.target.closest('#mpClose')) { closeMenu(); return; }
+  const tb = e.target.closest('[data-mtab]'); if (tb) { menuTab = tb.dataset.mtab; renderMenu(); Snd.click(); return; }
+  const so = e.target.closest('[data-set]');
+  if (so) {
+    const k = so.dataset.set, raw = so.dataset.val, v = raw === 'true' ? true : raw === 'false' ? false : raw;
+    if (save.settings[k] === v) return;
+    save.settings[k] = v; persist(); Snd.click();
+    if (k === 'quality' || k === 'traffic' || k === 'post') { location.reload(); return; }
+    renderMenu(); return;
+  }
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (act === 'export') {
+    const blob = new Blob([JSON.stringify(save)], { type: 'application/json' }), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `卡車改裝王存檔-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('📤 存檔已下載', 1800);
+  } else if (act === 'reset') {
+    if (confirm('真的要全部重新開始嗎？金幣、改裝、公司都會歸零，沒辦法復原。') && confirm('再確認一次：全部歸零？')) { localStorage.removeItem(SAVE_KEY); location.reload(); }
+  } else if (act === 'tutorial') {
+    closeMenu(); if (S.mode === 'title') startDriving(true); else startTutorial();
+  }
+});
+$('#menuBody').addEventListener('input', (e) => { if (e.target.matches('[data-vol]')) { save.settings.volume = Number(e.target.value) / 100; Snd.setVolume(save.settings.volume); persist(); } });
+$('#menuBody').addEventListener('change', (e) => {
+  const f = e.target.matches('[data-act="import"]') && e.target.files && e.target.files[0]; if (!f) return;
+  f.text().then((txt) => {
+    let data = null; try { data = JSON.parse(txt); } catch (_) { /* 不是存檔 */ }
+    if (!data || typeof data !== 'object' || !Number.isFinite(data.coins)) { toast('這個檔案不是卡車改裝王的存檔', 2200); return; }
+    if (!confirm('匯入後會取代現在的進度，確定嗎？')) return;
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data)); location.reload(); // 重新載入時 loadSave 會檢查每個欄位
+  });
+});
+document.querySelectorAll('[data-menu]').forEach((b) => b.addEventListener('click', () => { const k = b.dataset.menu; if (k === 'tutorial') startDriving(true); else openMenu(k); }));
+if ($('#bMenu')) $('#bMenu').onclick = () => openMenu('ach');
+
 // ================= 開始 =================
 window.__truck = { S, get save() { return save; }, hit: () => hitTest(S.x, S.z, S.heading, S.trailerHeading), boxes, input,
   step(n = 60) { for (let i = 0; i < n; i++) frame(1 / 60); }, get post() { return post; }, setDay(t) { dayT = t; dayKey = ''; dayMixT = 0; }, applyEnv, openGarage, closeGarage, traffic, dispatchUnit };
@@ -1503,10 +1656,15 @@ resize();
 updateCoins();
 $('#ver').textContent = '卡車改裝王 ' + VERSION;
 $('#startBtn').disabled = false; $('#loadMsg').textContent = '';
-$('#startBtn').onclick = () => {
-  Snd.init();
+function startDriving(tutorial = false) {
+  Snd.init(); Snd.setVolume(save.settings.volume ?? 1);
   S.mode = 'drive'; camInit = false;
   $('#title').classList.add('hidden'); $('#hud').classList.remove('hidden'); $('#touch').classList.remove('hidden');
-  toast('沿著橘色導航線去載貨！', 2500);
-};
+  closeMenu();
+  if (tutorial || (!save.deliveries && !(save.flags && save.flags.tutSeen))) startTutorial();
+  else toast('沿著橘色導航線去載貨！', 2500);
+}
+$('#startBtn').onclick = () => startDriving();
+$('#startBtn').textContent = save.deliveries ? '▶ 繼續遊戲' : '發動引擎';
+renderTitleStats();
 requestAnimationFrame(loop);

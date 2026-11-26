@@ -5,7 +5,7 @@ export const Snd = {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
     const ctx = (this.ctx = new C());
-    this.master = ctx.createGain(); this.master.gain.value = this.muted ? 0 : 0.7; this.master.connect(ctx.destination);
+    this.master = ctx.createGain(); this.master.gain.value = this.muted ? 0 : 0.7 * (this.vol ?? 1); this.master.connect(ctx.destination);
     // 白雜訊
     const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -41,7 +41,9 @@ export const Snd = {
     this.rainN = mk('highpass', 2500, 0.5);
     this.gravelN = mk('bandpass', 1800, 0.8);
   },
-  setMuted(m) { this.muted = m; if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.7, this.ctx.currentTime, 0.05); },
+  setMuted(m) { this.muted = m; if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.7 * (this.vol ?? 1), this.ctx.currentTime, 0.05); },
+  // v31：音量（0～1）
+  setVolume(v) { this.vol = Math.max(0, Math.min(1, v)); if (this.master && !this.muted) this.master.gain.setTargetAtTime(0.7 * this.vol, this.ctx.currentTime, 0.05); },
   suspend() { if (this.ctx) this.ctx.suspend(); },
   resume() { if (this.ctx) this.ctx.resume(); },
 
