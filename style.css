@@ -136,6 +136,11 @@ body.touch #mission { max-width: 46vw; }
 #popup.show { animation: pop 1.8s ease-out; }
 @keyframes pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.5); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
   30% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -90%); } }
+/* v24：駕駛座的數位後照鏡框；駕駛座視角時把右下角儀表收起來（儀表板上看得到） */
+.mirror-frame { display: none; position: fixed; z-index: 4; border: 3px solid #1b1d21; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.12); pointer-events: none; }
+.mirror-frame span { position: absolute; left: 6px; top: 4px; font-size: 11px; color: rgba(255,255,255,.85); text-shadow: 0 1px 3px #000; }
+body.cab-view .mirror-frame { display: block; }
+body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: none; }
 #ver { position: fixed; left: 8px; bottom: 2px; font-size: 11px; color: rgba(255,255,255,.4); z-index: 5; pointer-events: none; }
 
 

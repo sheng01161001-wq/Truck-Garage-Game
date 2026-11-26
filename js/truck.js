@@ -268,6 +268,38 @@ export function buildRig(cfg, dirt = 0) {
   else if (cfg.rims === 'color') { rimMat = new THREE.MeshStandardMaterial({ color: base, map: m.rimStd.map, metalness: 0.5, roughness: 0.3 }); own.push(rimMat); }
 
   const spins = [], front = [];
+  // v24：駕駛座內裝（儀表板螢幕、中控導航、排檔桿、門板、遮陽板）
+  const screenMats = { cluster: null, nav: null };
+  const plane = (w, h) => { const g = new THREE.PlaneGeometry(w, h); geos.push(g); return g; };
+  const sphere = (r) => { const g = new THREE.SphereGeometry(r, 14, 10); geos.push(g); return g; };
+  const cockpit = (C, cx, cy, cz, top, cabW) => {
+    const dash = new THREE.MeshStandardMaterial({ color: 0x1c1d20, roughness: 0.55, metalness: 0.05 }); own.push(dash);
+    const trim = new THREE.MeshStandardMaterial({ color: 0x3b3d42, roughness: 0.35, metalness: 0.6 }); own.push(trim);
+    const leather = new THREE.MeshStandardMaterial({ color: 0x2b2420, roughness: 0.75 }); own.push(leather);
+    // 儀表罩＋儀表螢幕（顯示真正的轉速表、速度表）
+    // 儀表螢幕立在儀表板上、往駕駛的方向斜一點；上面一片薄薄的遮光罩
+    part(C, rbox(0.56, 0.27, 0.05, 0.03), dash, cx, top + 0.1, cz + 0.035, 0.45);
+    screenMats.cluster = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }); own.push(screenMats.cluster);
+    const cl = part(C, plane(0.5, 0.22), screenMats.cluster, cx, top + 0.1, cz + 0.005, 0.45, Math.PI, 0); cl.castShadow = false;
+    // 中控台＋導航螢幕
+    const midX = cx > 0 ? cx - 0.72 : cx + 0.72;
+    part(C, rbox(0.34, 0.3, 0.05, 0.03), trim, midX, top + 0.12, cz + 0.03, 0.45);
+    screenMats.nav = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }); own.push(screenMats.nav);
+    const nv = part(C, plane(0.26, 0.26), screenMats.nav, midX, top + 0.12, cz, 0.45, Math.PI, 0); nv.castShadow = false;
+    part(C, rbox(0.42, 0.7, 0.55, 0.06), dash, midX, top - 0.6, cz - 0.32);
+    // 排檔桿
+    part(C, cyl(0.018, 0.022, 0.32, 10), trim, midX + (cx > 0 ? 0.08 : -0.08), top - 0.1, cz - 0.42, -0.35);
+    part(C, sphere(0.045), leather, midX + (cx > 0 ? 0.08 : -0.08), top + 0.06, cz - 0.48);
+    // 方向盤柱、門板、扶手、遮陽板
+    part(C, cyl(0.05, 0.06, 0.4, 10), dash, cx, cy - 0.06, cz - 0.15, 1.0);
+    for (const sx of [1, -1]) {
+      part(C, box(0.06, 0.9, 1.4), leather, sx * (cabW / 2 - 0.05), top - 0.35, cz - 0.7);
+      part(C, box(0.12, 0.06, 0.6), trim, sx * (cabW / 2 - 0.12), top - 0.25, cz - 0.75);
+      part(C, box(0.7, 0.03, 0.3), leather, sx * 0.55, top + 0.9, cz - 0.15, -0.25);
+    }
+    // 車頂內襯
+    part(C, box(cabW - 0.1, 0.04, 1.6), leather, 0, top + 1.08, cz - 0.7);
+  };
   const wheel = (parent, x, z, { dual = false, wide = false } = {}) => {
     const g = new THREE.Group(); g.position.set(x, WHEEL_R, z); parent.add(g);
     const spin = new THREE.Group(); g.add(spin);
@@ -392,16 +424,16 @@ export function buildRig(cfg, dirt = 0) {
     }
     // 車內：儀表板、方向盤、座椅
     part(C, box(2.3, 0.45, 0.6), m.interior, 0, 2.95, 4.95);
-    part(C, box(0.55, 0.22, 0.01), m.cluster, 0.6, 3.12, 4.66);
+    cockpit(C, 0.6, 3.1, 4.64, 3.175, 2.4);
     for (const sx of [1, -1]) part(C, box(0.6, 0.9, 0.12), m.seat, sx * 0.6, 2.4, 3.6);
     part(C, box(2.3, 2.5, 0.05), m.interior, 0, 2.7, 3.15);
-    steeringWheel = new THREE.Group(); steeringWheel.position.set(0.6, 3.15, 4.62); steeringWheel.rotation.x = 0.5; C.add(steeringWheel);
+    steeringWheel = new THREE.Group(); steeringWheel.position.set(0.6, 3.3, 4.42); steeringWheel.rotation.x = 0.6; C.add(steeringWheel);
     const sw = new THREE.Group(); steeringWheel.add(sw);
-    const tor = new THREE.TorusGeometry(0.23, 0.025, 8, 28); geos.push(tor);
+    const tor = new THREE.TorusGeometry(0.23, 0.036, 10, 32); geos.push(tor);
     part(sw, tor, m.black, 0, 0, 0);
     part(sw, box(0.44, 0.04, 0.02), m.black, 0, 0, 0); part(sw, box(0.04, 0.22, 0.02), m.black, 0, -0.11, 0);
     steeringWheel = sw;
-    camLocal = new THREE.Vector3(0.6, 3.62, 3.95);
+    camLocal = new THREE.Vector3(0.6, 3.82, 3.7); // 駕駛眼睛：坐高一點、離儀表板遠一點
     // 遮陽板、燈條、導流罩
     if (cfg.visor === 'on') part(C, box(2.45, 0.06, 0.48), paintPlain, 0, 4.1, 5.52, 0.25);
     if (cfg.lightbar === 'on') {
@@ -449,14 +481,14 @@ export function buildRig(cfg, dirt = 0) {
       wipers.push(p);
     }
     part(C, box(2.2, 0.45, 0.5), m.interior, 0, 3.15, 3.15);
-    part(C, box(0.5, 0.2, 0.01), m.cluster, 0.55, 3.3, 2.89);
+    cockpit(C, 0.55, 3.28, 2.88, 3.375, 2.35);
     for (const sx of [1, -1]) part(C, box(0.6, 0.9, 0.12), m.seat, sx * 0.55, 2.7, 1.8);
-    const swg = new THREE.Group(); swg.position.set(0.55, 3.38, 2.86); swg.rotation.x = 0.5; C.add(swg);
+    const swg = new THREE.Group(); swg.position.set(0.55, 3.52, 2.66); swg.rotation.x = 0.6; C.add(swg);
     const sw = new THREE.Group(); swg.add(sw);
-    const tor = new THREE.TorusGeometry(0.24, 0.025, 8, 28); geos.push(tor);
+    const tor = new THREE.TorusGeometry(0.24, 0.036, 10, 32); geos.push(tor);
     part(sw, tor, m.black, 0, 0, 0); part(sw, box(0.46, 0.04, 0.02), m.black, 0, 0, 0);
     steeringWheel = sw;
-    camLocal = new THREE.Vector3(0.55, 3.88, 2.2);
+    camLocal = new THREE.Vector3(0.55, 4.02, 1.95);
     if (cfg.visor === 'on') part(C, box(2.3, 0.06, 0.45), paintPlain, 0, 4.18, 3.62, 0.25);
     if (cfg.lightbar === 'on') {
       part(C, rbox(2.0, 0.16, 0.22, 0.05), m.black, 0, 4.32, 3.3);
@@ -603,7 +635,7 @@ export function buildRig(cfg, dirt = 0) {
 
   return {
     tractor, cab, trailer, trailerBody: tBody, front, spins, trailerSpins: tSpins, wipers, steeringWheel, spots, windshield,
-    camLocal, cabInner: C, frontZ: US ? 6.6 : 5.7, paint, paintPlain, rimMat: cfg.rims === 'color' ? rimMat : null,
+    camLocal, cabInner: C, frontZ: US ? 6.6 : 5.7, screenMats, mirrorLocal: US ? [new THREE.Vector3(1.5, 3.4, 3.2), new THREE.Vector3(-1.5, 3.4, 3.2)] : [new THREE.Vector3(1.45, 3.3, 5.1), new THREE.Vector3(-1.45, 3.3, 5.1)], paint, paintPlain, rimMat: cfg.rims === 'color' ? rimMat : null,
     chameleon: cham, glowMat, glowLight, rainbowGlow: cfg.glow === 'rainbow',
     setLoaded(v) { if (load) load.visible = v; },
     redrawDirt(d) { surfaces.forEach((s) => s.redraw(d)); },

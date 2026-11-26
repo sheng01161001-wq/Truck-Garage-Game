@@ -1,4 +1,4 @@
-// 卡車改裝王 v23（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v24（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v23';
+const VERSION = 'v24';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -1033,7 +1033,7 @@ function updateCamera(dt) {
     rig.cabInner.localToWorld(want.copy(rig.camLocal));
     const q = new THREE.Quaternion(); rig.cab.getWorldQuaternion(q);
     const yaw = S.camYawT > 0 ? S.camYaw : 0;
-    look.set(Math.sin(yaw) * 10, -0.6, Math.cos(yaw) * 10).applyQuaternion(q).add(want);
+    look.set(Math.sin(yaw) * 10, -0.45, Math.cos(yaw) * 10).applyQuaternion(q).add(want);
     camPos.copy(want); camLook.copy(look);
     camera.position.copy(want); camera.lookAt(look); return;
   } else if (S.cam === 3 && !S.tunNear) {
@@ -1091,7 +1091,94 @@ function updateHud(dt) {
 // ================= 主迴圈 =================
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
-  renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = w < h ? 72 : 55; camera.updateProjectionMatrix();
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = baseFov(); camera.updateProjectionMatrix();
+  if (post) post.setSize(w, h);
+}
+// 駕駛座視角廣一點（看得到兩邊窗外）
+const baseFov = () => { const portrait = window.innerWidth < window.innerHeight; return S.mode === 'drive' && S.cam === 2 && !inGarage() ? (portrait ? 85 : 68) : (portrait ? 72 : 55); };
+
+// ================= v24：畫面後製（高畫質才開）：環境光遮蔽（角落陰影）、發光、邊緣平滑 =================
+let post = null;
+if (HIGH) {
+  Promise.all([
+    import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'),
+    import('three/addons/postprocessing/GTAOPass.js'), import('three/addons/postprocessing/UnrealBloomPass.js'),
+    import('three/addons/postprocessing/OutputPass.js'),
+  ]).then(([{ EffectComposer }, { RenderPass }, { GTAOPass }, { UnrealBloomPass }, { OutputPass }]) => {
+    const w = window.innerWidth, h = window.innerHeight;
+    const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4 });
+    const composer = new EffectComposer(renderer, rt);
+    composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    composer.setSize(w, h);
+    composer.addPass(new RenderPass(scene, camera));
+    const gtao = new GTAOPass(scene, camera, w, h);
+    gtao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.6, thickness: 2.5, scale: 1.4, samples: 12 });
+    gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+    gtao.blendIntensity = 0.9;
+    composer.addPass(gtao);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.4, 2.2); // 只有車燈、路燈這種很亮的東西會發光
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+    post = { composer, gtao, bloom, slow: 0, setSize(a, b) { composer.setSize(a, b); } };
+  }).catch((e) => console.warn('後製效果載入失敗，用一般畫面：', e));
+}
+// 數位後照鏡（駕駛座視角才顯示）：畫面左右上方各一個小畫面
+const mirrorCams = [new THREE.PerspectiveCamera(32, 1.3, 0.5, HIGH ? 600 : 250), new THREE.PerspectiveCamera(32, 1.3, 0.5, HIGH ? 600 : 250)]; // 順暢模式看近一點，比較省
+const mirrorFrames = [document.createElement('div'), document.createElement('div')];
+mirrorFrames.forEach((d, i) => { d.className = 'mirror-frame'; d.innerHTML = `<span>${i ? '右後' : '左後'}</span>`; document.body.appendChild(d); });
+const mirrorRect = (i) => {
+  const W = window.innerWidth, H = window.innerHeight, mw = Math.round(Math.min(W * 0.2, 300)), mh = Math.round(mw / 1.3);
+  const top = Math.round(H * (W < 760 ? 0.2 : 0.16));
+  return { x: i ? W - mw - 10 : 10, y: top, w: mw, h: mh }; // 0＝左邊（駕駛座在左）、1＝右邊
+};
+const _mv = new THREE.Vector3(), _mf = new THREE.Vector3();
+// 後照鏡先畫到小貼圖（隔幾格才重畫一次，比較省），每一格再把貼圖貼到畫面角落
+const mirrorRTs = [0, 1].map(() => new THREE.WebGLRenderTarget(320, 246, { samples: HIGH ? 4 : 0, type: THREE.HalfFloatType }));
+const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quadScene = new THREE.Scene();
+const quadMat = new THREE.MeshBasicMaterial(), quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), quadMat); // 貼到畫面時才做色調（跟主畫面一樣）
+quadScene.add(quad);
+let mirrorTick = 0;
+const mirrorReady = [false, false];
+function renderMirrors() {
+  const show = S.mode === 'drive' && S.cam === 2 && !inGarage() && !S.followFleetId;
+  document.body.classList.toggle('cab-view', show);
+  if (!show || !rig.mirrorLocal) return;
+  const H = window.innerHeight, every = HIGH ? 2 : 3;
+  mirrorTick++;
+  const auto = renderer.autoClear, shadowAuto = renderer.shadowMap.autoUpdate;
+  renderer.shadowMap.autoUpdate = false; // 後照鏡不用重算陰影
+  const fx2 = -Math.sin(S.trailerHeading), fz2 = -Math.cos(S.trailerHeading); // 往後看（沿著拖車）
+  rig.mirrorLocal.forEach((ml, i) => {
+    if ((mirrorTick + i) % every !== 0 && mirrorReady[i]) return;
+    const cam = mirrorCams[i];
+    rig.cabInner.localToWorld(_mv.copy(ml));
+    const side = i ? -1 : 1; // 車頭座標 +x＝左邊：0＝左後照鏡、1＝右後照鏡，鏡頭稍微往外看
+    const ox = Math.cos(S.heading) * side * 1.2, oz = -Math.sin(S.heading) * side * 1.2;
+    cam.position.copy(_mv);
+    cam.lookAt(_mf.set(_mv.x + fx2 * 30 + ox, _mv.y - 1.2, _mv.z + fz2 * 30 + oz));
+    cam.aspect = 320 / 246; cam.updateProjectionMatrix();
+    renderer.setRenderTarget(mirrorRTs[i]); renderer.autoClear = true; renderer.render(scene, cam);
+    mirrorReady[i] = true;
+  });
+  renderer.setRenderTarget(null);
+  renderer.autoClear = false; renderer.setScissorTest(true);
+  rig.mirrorLocal.forEach((ml, i) => {
+    const r = mirrorRect(i), vy = H - r.y - r.h;
+    renderer.setViewport(r.x, vy, r.w, r.h); renderer.setScissor(r.x, vy, r.w, r.h);
+    quadMat.map = mirrorRTs[i].texture; renderer.render(quadScene, quadCam);
+    mirrorFrames[i].style.cssText = `left:${r.x - 3}px;top:${r.y - 3}px;width:${r.w}px;height:${r.h}px`;
+  });
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+  renderer.autoClear = auto; renderer.shadowMap.autoUpdate = shadowAuto;
+}
+// 儀表板螢幕、導航螢幕：用 HUD 的儀表和小地圖畫面
+let clusterTex = null, navTex = null;
+function updateCabScreens() {
+  if (!rig.screenMats || !rig.screenMats.cluster) return;
+  if (!clusterTex) { clusterTex = new THREE.CanvasTexture(clusterCv); clusterTex.colorSpace = THREE.SRGBColorSpace; navTex = new THREE.CanvasTexture(mapCv); navTex.colorSpace = THREE.SRGBColorSpace; }
+  if (rig.screenMats.cluster.map !== clusterTex) { rig.screenMats.cluster.map = clusterTex; rig.screenMats.cluster.needsUpdate = true; rig.screenMats.nav.map = navTex; rig.screenMats.nav.needsUpdate = true; }
+  if (S.cam === 2) { clusterTex.needsUpdate = true; navTex.needsUpdate = true; }
 }
 window.addEventListener('resize', resize);
 const clock = new THREE.Clock();
@@ -1144,12 +1231,20 @@ function frame(dt) {
   updateCamera(dt);
   env.update(dt, focus, camera.position, !inGarage() && inTunnel(camera.position.x, camera.position.y, camera.position.z));
   if (S.mode === 'drive') updateHud(dt);
-  renderer.render(scene, camera);
+  updateCabScreens();
+  const fov = baseFov(); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  if (post) {
+    // 太慢（平均一格超過 30 毫秒）：先關掉角落陰影
+    if (S.time > 8) post.slow = post.slow * 0.99 + (dt > 0.03 ? 1 : 0) * 0.01; // 開始玩 8 秒後才算，載入時的卡頓不算
+    if (post.slow > 0.75 && post.gtao.enabled) { post.gtao.enabled = false; console.info('畫面太慢，關掉環境光遮蔽'); }
+    post.composer.render(dt);
+  } else renderer.render(scene, camera);
+  renderMirrors();
 }
 
 // ================= 開始 =================
 window.__truck = { S, get save() { return save; }, hit: () => hitTest(S.x, S.z, S.heading, S.trailerHeading), boxes, input,
-  step(n = 60) { for (let i = 0; i < n; i++) frame(1 / 60); }, applyEnv, openGarage, closeGarage, traffic, dispatchUnit };
+  step(n = 60) { for (let i = 0; i < n; i++) frame(1 / 60); }, get post() { return post; }, applyEnv, openGarage, closeGarage, traffic, dispatchUnit };
 newMission();
 rebuildRig(save.truck);
 applyEnv();
