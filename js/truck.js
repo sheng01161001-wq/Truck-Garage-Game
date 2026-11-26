@@ -9,6 +9,8 @@ export const WHEEL_R = 0.53;
 
 // ---------- 共用材質（只建一次） ----------
 let M = null;
+// v26：大燈顏色
+const HEAD_COL = { white: 0xf2f6ff, warm: 0xffd58a, blue: 0xb8dcff };
 function mats() {
   if (M) return M;
   const tread = treadTex();
@@ -268,14 +270,24 @@ export function buildRig(cfg, dirt = 0) {
   else if (cfg.rims === 'color') { rimMat = new THREE.MeshStandardMaterial({ color: base, map: m.rimStd.map, metalness: 0.5, roughness: 0.3 }); own.push(rimMat); }
 
   const spins = [], front = [];
+  const seatMat = new THREE.MeshStandardMaterial({ color: { beige: 0xbfa77f, red: 0x7c1818 }[cfg.interior] || 0x3a3330, roughness: 0.85 }); own.push(seatMat);
+  const tSkirt = new THREE.MeshStandardMaterial({ color: cfg.trailerColor || '#e9ecef', roughness: 0.5, metalness: 0.2 }); own.push(tSkirt);
   // v24：駕駛座內裝（儀表板螢幕、中控導航、排檔桿、門板、遮陽板）
   const screenMats = { cluster: null, nav: null };
   const plane = (w, h) => { const g = new THREE.PlaneGeometry(w, h); geos.push(g); return g; };
   const sphere = (r) => { const g = new THREE.SphereGeometry(r, 14, 10); geos.push(g); return g; };
   const cockpit = (C, cx, cy, cz, top, cabW) => {
-    const dash = new THREE.MeshStandardMaterial({ color: 0x1c1d20, roughness: 0.55, metalness: 0.05 }); own.push(dash);
+    const IN = { black: [0x1c1d20, 0x2b2420], beige: [0x3a342c, 0xc9b28c], red: [0x18181a, 0x8f1d1d] }[cfg.interior] || [0x1c1d20, 0x2b2420];
+    const dash = new THREE.MeshStandardMaterial({ color: IN[0], roughness: 0.55, metalness: 0.05 }); own.push(dash);
     const trim = new THREE.MeshStandardMaterial({ color: 0x3b3d42, roughness: 0.35, metalness: 0.6 }); own.push(trim);
-    const leather = new THREE.MeshStandardMaterial({ color: 0x2b2420, roughness: 0.75 }); own.push(leather);
+    const leather = new THREE.MeshStandardMaterial({ color: IN[1], roughness: 0.7 }); own.push(leather);
+    // 氣氛燈：儀表板下緣、兩邊門板一條發光燈條
+    const AMB = { blue: 0x2f8cff, pink: 0xff4fc8, gold: 0xffb43a }[cfg.ambient];
+    if (AMB) {
+      const am = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: AMB, emissiveIntensity: 3 }); own.push(am);
+      part(C, box(cabW - 0.4, 0.02, 0.02), am, 0, top - 0.02, cz - 0.02).castShadow = false;
+      for (const sx of [1, -1]) part(C, box(0.02, 0.02, 1.2), am, sx * (cabW / 2 - 0.09), top - 0.05, cz - 0.7).castShadow = false;
+    }
     // 儀表罩＋儀表螢幕（顯示真正的轉速表、速度表）
     // 儀表螢幕立在儀表板上、往駕駛的方向斜一點；上面一片薄薄的遮光罩
     part(C, rbox(0.56, 0.27, 0.05, 0.03), dash, cx, top + 0.1, cz + 0.035, 0.45);
@@ -318,6 +330,9 @@ export function buildRig(cfg, dirt = 0) {
   const pivot = US ? new THREE.Vector3(0, 1.6, 3.6) : new THREE.Vector3(0, 1.3, 4.2);
   const cab = new THREE.Group(); cab.position.copy(pivot); tractor.add(cab);
   const C = new THREE.Group(); C.position.copy(pivot).multiplyScalar(-1); cab.add(C);
+  // v26：車身高度（低趴／加高：駕駛室和車身一起升降）
+  const rideY = cfg.chassis === 'low' ? -0.12 : cfg.chassis === 'lift' ? 0.22 : 0;
+  cab.position.y += rideY;
 
   const bumperZ = US ? 6.35 : 5.45;
   const cabBackZ = US ? 1.55 : 3.09;
@@ -339,11 +354,13 @@ export function buildRig(cfg, dirt = 0) {
   // 變速箱
   part(tractor, rbox(0.55, 0.5, 0.9, 0.08), m.chassis, 0, 0.95, 3.15);
   // 油箱（鋁）＋綁帶
-  part(tractor, rbox(0.62, 0.62, 1.4, 0.26), m.alu, 1.0, 1.0, 2.25);
+  part(tractor, rbox(0.62, 0.62, 1.4, 0.26), cfg.tanks === 'chrome' ? m.chrome : m.alu, 1.0, 1.0, 2.25);
   for (const z of [1.8, 2.7]) part(tractor, box(0.66, 0.66, 0.05), m.black, 1.0, 1.0, z);
   // 電瓶箱、儲氣筒
   part(tractor, rbox(0.55, 0.5, 0.8, 0.04), m.black, -1.0, 1.05, 1.9);
   for (const y of [0.78, 1.12]) part(tractor, cyl(0.15, 0.15, 0.9, 14), m.steel, -0.95, y, 2.85, Math.PI / 2);
+  // v26：車頭側裙（前輪和後輪中間，同車身色）
+  if (cfg.skirts === 'on') for (const sx of [1, -1]) part(tractor, rbox(0.06, 0.62, 2.1, 0.03), paintPlain, sx * 1.34, 1.05, 2.3);
   // 後擋泥板、擋泥皮
   for (const sx of [1, -1]) {
     part(tractor, rbox(0.75, 0.07, 2.9, 0.03), m.plastic, sx * 0.92, 1.2, 0);
@@ -425,7 +442,7 @@ export function buildRig(cfg, dirt = 0) {
     // 車內：儀表板、方向盤、座椅
     part(C, box(2.3, 0.45, 0.6), m.interior, 0, 2.95, 4.95);
     cockpit(C, 0.6, 3.1, 4.64, 3.175, 2.4);
-    for (const sx of [1, -1]) part(C, box(0.6, 0.9, 0.12), m.seat, sx * 0.6, 2.4, 3.6);
+    for (const sx of [1, -1]) part(C, box(0.6, 0.9, 0.12), seatMat, sx * 0.6, 2.4, 3.6);
     part(C, box(2.3, 2.5, 0.05), m.interior, 0, 2.7, 3.15);
     steeringWheel = new THREE.Group(); steeringWheel.position.set(0.6, 3.3, 4.42); steeringWheel.rotation.x = 0.6; C.add(steeringWheel);
     const sw = new THREE.Group(); steeringWheel.add(sw);
@@ -482,7 +499,7 @@ export function buildRig(cfg, dirt = 0) {
     }
     part(C, box(2.2, 0.45, 0.5), m.interior, 0, 3.15, 3.15);
     cockpit(C, 0.55, 3.28, 2.88, 3.375, 2.35);
-    for (const sx of [1, -1]) part(C, box(0.6, 0.9, 0.12), m.seat, sx * 0.55, 2.7, 1.8);
+    for (const sx of [1, -1]) part(C, box(0.6, 0.9, 0.12), seatMat, sx * 0.55, 2.7, 1.8);
     const swg = new THREE.Group(); swg.position.set(0.55, 3.52, 2.66); swg.rotation.x = 0.6; C.add(swg);
     const sw = new THREE.Group(); swg.add(sw);
     const tor = new THREE.TorusGeometry(0.24, 0.036, 10, 32); geos.push(tor);
@@ -505,11 +522,12 @@ export function buildRig(cfg, dirt = 0) {
   } else {
     part(tractor, rbox(0.5, 0.45, 0.7, 0.1), m.steel, 1.0, 1.05, 3.1);
   }
-  // 頭燈光束（晚上才開）
+  // 頭燈光束（晚上才開）；v26 大燈顏色
+  m.head.emissive.set(HEAD_COL[cfg.headlight] || 0xfff6e0);
   const spots = [];
   const hz = US ? 6.05 : 5.42, hy = US ? 1.95 : 1.6;
   for (const sx of [1, -1]) {
-    const sp = new THREE.SpotLight(0xfff2dd, 0, 90, 0.5, 0.55, 1.2);
+    const sp = new THREE.SpotLight(HEAD_COL[cfg.headlight] || 0xfff2dd, 0, 90, 0.5, 0.55, 1.2);
     sp.position.set(sx * 0.9, hy, hz); sp.target.position.set(sx * 1.5, 0, hz + 30);
     C.add(sp, sp.target); spots.push(sp);
   }
@@ -552,8 +570,8 @@ export function buildRig(cfg, dirt = 0) {
   for (const sx of [1, -1]) {
     part(trailer, rbox(0.55, 0.06, 4.0, 0.02), m.plastic, sx * 1.0, 1.2, -10.7);
     part(trailer, box(0.6, 0.5, 0.02), m.rubber, sx * 1.0, 0.62, -12.75);
-    part(trailer, box(0.05, 0.12, 6.0), m.steel, sx * 1.2, 0.85, -5.4);
-    part(trailer, box(0.05, 0.12, 6.0), m.steel, sx * 1.2, 1.1, -5.4);
+    if (cfg.skirts === 'on') part(trailer, box(0.04, 0.72, 6.6), tSkirt, sx * 1.22, 0.86, -5.4); // 拖車空力側裙
+    else { part(trailer, box(0.05, 0.12, 6.0), m.steel, sx * 1.2, 0.85, -5.4); part(trailer, box(0.05, 0.12, 6.0), m.steel, sx * 1.2, 1.1, -5.4); }
     part(trailer, box(0.7, 0.22, 0.08), m.black, sx * 0.85, 1.0, -12.95);
     part(trailer, box(0.28, 0.16, 0.03), m.tail, sx * 0.95, 1.0, -13.0);
     part(trailer, box(0.13, 0.16, 0.03), sx > 0 ? m.indL : m.indR, sx * 0.7, 1.0, -13.0);

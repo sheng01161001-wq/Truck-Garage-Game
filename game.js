@@ -1,4 +1,4 @@
-// 卡車改裝王 v25（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
+// 卡車改裝王 v26（寫實版）— 主程式：存檔、操作、重車物理、送貨任務、鏡頭、儀表、改裝車庫
 import * as THREE from 'three';
 import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v25';
+const VERSION = 'v26';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -24,6 +24,7 @@ const DEFAULT_TRUCK = {
   cabColor: '#b71c1c', cabColor2: '#ffb000', cabGradient: 'off', paint: 'normal', pattern: 'none', patternColor: '#ffd60a',
   rims: 'std', bumper: 'std', lightbar: 'off', stacks: 'off', visor: 'off', spoiler: 'off',
   horn: 'normal', glow: 'off',
+  tires: 'std', brakes: 'std', suspension: 'std', chassis: 'std', skirts: 'off', tanks: 'alu', interior: 'black', ambient: 'off', headlight: 'white',
   trailerColor: '#e9ecef', trailerColor2: '#9aa7b4', trailerGradient: 'off', trailerPattern: 'none', trailerPatColor: '#1d3557', name: '我的卡車',
   cabDecalData: '', cabDecalX: 0, cabDecalY: 0, cabDecalScale: 0.34, cabDecalRotation: 0,
   trailerDecalData: '', trailerDecalX: 0, trailerDecalY: 0, trailerDecalScale: 0.42, trailerDecalRotation: 0,
@@ -65,7 +66,7 @@ const CATALOG = {
   ] },
   bumper: { title: '保險桿', items: [
     { id: 'std', name: '原廠', icon: '▬', price: 0 },
-    { id: 'chromeb', name: '電鍍', icon: '🪙', price: 120 },
+    { id: 'chromeb', name: '電鍍', icon: '✨', price: 120 },
     { id: 'bull', name: '鐵牛欄', icon: '🐂', price: 150 },
   ] },
   rims: { title: '輪框', items: [
@@ -84,6 +85,45 @@ const CATALOG = {
     { id: 'train', name: '火車喇叭', icon: '🚂', price: 100 },
     { id: 'cow', name: '牛叫喇叭', icon: '🐄', price: 120 },
   ] },
+  // v26：性能零件（真的會影響開車）
+  tires: { title: '輪胎', items: [
+    { id: 'std', name: '一般輪胎', icon: '⚫', price: 0 },
+    { id: 'allweather', name: '全天候輪胎（雨天不容易滑）', icon: '🌧', price: 260 },
+    { id: 'sport', name: '高抓地輪胎（轉彎更穩）', icon: '🏁', price: 380 },
+  ] },
+  brakes: { title: '煞車', items: [
+    { id: 'std', name: '一般煞車', icon: '🛑', price: 0 },
+    { id: 'ceramic', name: '陶瓷煞車（煞得快、不怕燙）', icon: '🔥', price: 420 },
+  ] },
+  suspension: { title: '懸吊', items: [
+    { id: 'std', name: '鋼板彈簧', icon: '〰️', price: 0 },
+    { id: 'air', name: '氣壓懸吊（更平穩、比較不晃）', icon: '💨', price: 350 },
+  ] },
+  // v26：車架與外觀零件
+  chassis: { title: '車身高度', items: [
+    { id: 'std', name: '原廠高度', icon: '🚛', price: 0 },
+    { id: 'low', name: '低趴', icon: '⬇️', price: 220 },
+    { id: 'lift', name: '加高', icon: '⬆️', price: 220 },
+  ] },
+  skirts: { title: '側裙（車頭＋拖車）', items: [{ id: 'off', name: '不裝', icon: '✖️', price: 0 }, { id: 'on', name: '空力側裙', icon: '🛡️', price: 200 }] },
+  tanks: { title: '油箱', items: [{ id: 'alu', name: '鋁油箱', icon: '🛢️', price: 0 }, { id: 'chrome', name: '電鍍鏡面油箱', icon: '💎', price: 160 }] },
+  headlight: { title: '大燈顏色', items: [
+    { id: 'white', name: '白光 LED', icon: '⚪', price: 0 },
+    { id: 'warm', name: '黃光', icon: '🟡', price: 60 },
+    { id: 'blue', name: '冰藍光', icon: '🔵', price: 120 },
+  ] },
+  // v26：內裝（駕駛座視角看得到）
+  interior: { title: '座艙內裝', items: [
+    { id: 'black', name: '黑色', icon: '⬛', price: 0 },
+    { id: 'beige', name: '米色真皮', icon: '🟫', price: 240 },
+    { id: 'red', name: '紅色跑車', icon: '🟥', price: 300 },
+  ] },
+  ambient: { title: '車內氣氛燈', items: [
+    { id: 'off', name: '不裝', icon: '✖️', price: 0 },
+    { id: 'blue', name: '藍色', icon: '💙', price: 120 },
+    { id: 'pink', name: '粉紅', icon: '💗', price: 120 },
+    { id: 'gold', name: '金色', icon: '💛', price: 150 },
+  ] },
   glow: { title: '底盤燈', items: [
     { id: 'off', name: '不裝', icon: '✖️', price: 0 },
     { id: 'blue', name: '藍色', icon: '💙', price: 200 },
@@ -96,7 +136,7 @@ const catList = (cat) => CATALOG[cat === 'trailerPattern' ? 'pattern' : cat].ite
 const ownKey = (cat, id) => (cat === 'trailerPattern' ? 'pattern' : cat) + ':' + id;
 const itemOf = (cat, id) => catList(cat).find((i) => i.id === id);
 function isOwned(cat, id) { const it = itemOf(cat, id); return !!it && (it.price === 0 || save.owned.includes(ownKey(cat, id))); }
-const ITEM_KEYS = ['cabStyle', 'trailerType', 'paint', 'pattern', 'bumper', 'rims', 'stacks', 'lightbar', 'visor', 'spoiler', 'horn', 'glow', 'trailerPattern'];
+const ITEM_KEYS = ['cabStyle', 'trailerType', 'paint', 'pattern', 'bumper', 'rims', 'stacks', 'lightbar', 'visor', 'spoiler', 'horn', 'glow', 'trailerPattern', 'tires', 'brakes', 'suspension', 'chassis', 'skirts', 'tanks', 'headlight', 'interior', 'ambient'];
 const COLOR_KEYS = ['cabColor', 'cabColor2', 'patternColor', 'trailerColor', 'trailerColor2', 'trailerPatColor'];
 const PALETTE = ['#b71c1c', '#e65100', '#f9a825', '#2e7d32', '#00695c', '#0277bd', '#1a237e', '#4a148c',
   '#ad1457', '#f5f5f5', '#9e9e9e', '#37474f', '#111111', '#5d4037', '#c0a062', '#00e5ff'];
@@ -437,7 +477,7 @@ $('#envClose').onclick = () => $('#envPanel').classList.add('hidden');
 // ---- 車庫 ----
 const TABS = [
   { id: 'model', name: '🚛 車型' }, { id: 'paint', name: '🎨 烤漆' }, { id: 'studio', name: '🖌️ 噴漆工坊' }, { id: 'pattern', name: '🔥 彩繪' },
-  { id: 'parts', name: '🔧 零件' }, { id: 'fun', name: '📯 喇叭燈' }, { id: 'trailer', name: '📦 拖車' },
+  { id: 'parts', name: '🔧 零件' }, { id: 'perf', name: '⚙️ 性能' }, { id: 'cabin', name: '🛋️ 內裝' }, { id: 'fun', name: '📯 喇叭燈' }, { id: 'trailer', name: '📦 拖車' },
   { id: 'fleet', name: '🏆 收藏車庫' }, { id: 'company', name: '🏢 物流經營' },
 ];
 function openGarage() {
@@ -525,7 +565,9 @@ function renderGarage() {
     </div>
     <div class="studio-note">圖片會縮圖後保存在本機存檔。可在預覽區直接拖曳圖案定位，也可用滑桿微調；車頭與拖車各自獨立儲存。</div>`;
   else if (S.gTab === 'pattern') h = secHtml('彩繪圖案') + cardsHtml('pattern') + secHtml('彩繪顏色（免費換）') + swatchHtml('patternColor');
-  else if (S.gTab === 'parts') h = ['bumper', 'rims', 'stacks', 'lightbar', 'visor', 'spoiler'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
+  else if (S.gTab === 'parts') h = ['bumper', 'rims', 'chassis', 'skirts', 'tanks', 'stacks', 'lightbar', 'headlight', 'visor', 'spoiler'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
+  else if (S.gTab === 'perf') h = `<div class="studio-note">這些零件會真的改變開車的感覺：輪胎影響轉彎和雨天打滑、煞車影響煞車距離和過熱、懸吊影響晃動和側傾。</div>` + ['tires', 'brakes', 'suspension'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('') + secHtml('引擎、油耗升級') + '<div class="studio-note">引擎動力和節能升級在「🏢 物流經營」分頁。</div>';
+  else if (S.gTab === 'cabin') h = `<div class="studio-note">內裝在駕駛座視角（📷 鏡頭 →「駕駛座」）看得到。</div>` + ['interior', 'ambient'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
   else if (S.gTab === 'fun') h = ['horn', 'glow'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
   else if (S.gTab === 'trailer') {
     h = secHtml('拖車顏色（免費換）') + swatchHtml('trailerColor') + secHtml('拖車彩繪（買過的圖案都能用）') + cardsHtml('trailerPattern')
@@ -754,7 +796,9 @@ function focusForItem(cat) {
   if (cat === 'trailerType' || cat === 'trailerPattern') return 'trailer';
   if (cat === 'cabStyle') return 'front';
   if (cat === 'paint' || cat === 'pattern' || cat === 'cabColor' || cat === 'patternColor') return 'paint';
-  if (cat === 'glow') return 'side';
+  if (cat === 'glow' || cat === 'skirts' || cat === 'tanks' || cat === 'chassis' || cat === 'tires' || cat === 'brakes' || cat === 'suspension') return 'side';
+  if (cat === 'headlight') return 'front';
+  if (cat === 'interior' || cat === 'ambient') return 'front';
   return 'overview';
 }
 
@@ -819,7 +863,8 @@ function drive(dt) {
   const surf = surfaceAt(S.x, S.z); S.lastSurface = surf;
   const wet = env.state.wet;
   const loadGrip = clamp(1 - tons * 0.0035, 0.88, 1);
-  const grip = (surf === 'road' ? 1 : surf === 'gravel' ? 0.72 : 0.78) * (wet ? 0.78 : 1) * loadGrip;
+  const tireT = save.truck.tires, wetMul = tireT === 'allweather' ? 0.9 : 0.78, dryMul = tireT === 'sport' ? 1.1 : 1;
+  const grip = (surf === 'road' ? 1 : surf === 'gravel' ? 0.72 : 0.78) * (wet ? wetMul : 1) * dryMul * loadGrip;
   const crr = surf === 'road' ? 0.008 : surf === 'gravel' ? 0.042 : 0.028;
   S.speedLimit = speedLimitAt(S.x, S.z, S.y);
   // 油門、煞車慢慢踩下去
@@ -865,8 +910,9 @@ function drive(dt) {
   if (!rev && S.v > VMAX + save.company.engineLevel * 0.7 + 0.3) a -= (S.v - (VMAX + save.company.engineLevel * 0.7)) * 1.5;
   if (rev && S.v < -5) a += (-5 - S.v) * 1.5; // 倒車下坡也不會越倒越快
   // 煞車：重車煞車距離比較長
-  const fade = 1 - clamp((S.brakeTemp - 0.45) * 0.62, 0, 0.38);
-  const brakeDecel = brakePedal * 5.2 * grip * (1 - tons / 65) * fade; // 重車煞車距離長：滿載大約是空車的 1.6 倍
+  const ceramic = save.truck.brakes === 'ceramic';
+  const fade = 1 - clamp((S.brakeTemp - (ceramic ? 0.7 : 0.45)) * 0.62, 0, 0.38);
+  const brakeDecel = brakePedal * (ceramic ? 6.0 : 5.2) * grip * (1 - tons / 65) * fade; // 重車煞車距離長：滿載大約是空車的 1.6 倍
   S.v += a * dt;
   if (brakeDecel > 0) { const dv = brakeDecel * dt; S.v = Math.abs(S.v) <= dv ? 0 : S.v - Math.sign(S.v) * dv; }
   // 長時間重煞車會累積煞車溫度；放開煞車後逐漸冷卻，熱衰退會降低制動力。
@@ -935,7 +981,8 @@ function drive(dt) {
   const risk = Math.abs(aLat) * (1 + tons / 40) * cg;
   S.tipT = risk > 14 ? (S.tipT || 0) + dt : Math.max(0, (S.tipT || 0) - dt * 2);
   if (risk > 10) S.hint = '轉彎太快了，慢一點，小心翻車！';
-  const rollT = clamp(aLat * 0.016 * (1 + tons / 40), -0.1, 0.1) * (1 + S.tipT * 2), pitchT = clamp(-aLong * 0.008, -0.05, 0.05);
+  const airSus = save.truck.suspension === 'air';
+  const rollT = clamp(aLat * (airSus ? 0.011 : 0.016) * (1 + tons / 40), -0.1, 0.1) * (1 + S.tipT * 2), pitchT = clamp(-aLong * (airSus ? 0.005 : 0.008), -0.05, 0.05);
   S.rollV += ((rollT - S.roll) * 70 - S.rollV * 9) * dt; S.roll += S.rollV * dt;
   if (S.tipT > 0.7 && !S.rollover) { S.rollover = true; S.tipSide = Math.sign(aLat) || 1; S.v = 0; S.rolloverWarned = true; Snd.thud(1); S.shake = 1.2; toast('⚠️ 轉太快翻車了！按 🔄（或 R）回到改裝廠', 4200); }
   S.pitchV += ((pitchT - S.pitch) * 70 - S.pitchV * 9) * dt; S.pitch += S.pitchV * dt;
@@ -943,7 +990,7 @@ function drive(dt) {
   const roughness = Math.min(1.8, Math.abs(S.v) / 12);
   S.bump = Math.sin(S.travelled * 1.9) * Math.sin(S.travelled * 0.71) * amp * roughness;
   // N：底盤懸吊以彈簧／阻尼回應路面起伏，車速越快、碎石路越顛簸。
-  const suspensionTarget = S.bump * (surf === 'road' ? 0.65 : 1.15);
+  const suspensionTarget = S.bump * (surf === 'road' ? 0.65 : 1.15) * (airSus ? 0.45 : 1);
   S.suspensionV += ((suspensionTarget - S.suspension) * 34 - S.suspensionV * 8.5) * dt;
   S.suspension += S.suspensionV * dt;
   // 油、水溫、髒污
