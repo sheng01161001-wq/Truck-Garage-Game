@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>卡車改裝王｜橫向電影模式</title>
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; color: #e8edf2; user-select: none; -webkit-user-select: none; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .bar { position: fixed; top: 10px; display: flex; gap: 8px; z-index: 5; }
+  .bar.left { left: 10px; } .bar.right { right: 10px; }
+  .chip { background: rgba(10,14,19,.72); border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 8px 12px; font-weight: 900; font-size: 16px; backdrop-filter: blur(6px); }
+  .btn { background: rgba(10,14,19,.72); border: 1px solid rgba(255,255,255,.16); border-radius: 12px; color: #e8edf2; padding: 8px 12px; font-size: 15px; font-weight: 800; cursor: pointer; backdrop-filter: blur(6px); }
+  .btn.on { background: linear-gradient(135deg,#ffd47a,#e99a2b); color: #15191e; border-color: #ffd47a; }
+  .pedals { position: fixed; bottom: 18px; z-index: 5; display: flex; gap: 14px; }
+  .pedals.left { left: 18px; } .pedals.right { right: 18px; }
+  .pedal { width: 96px; height: 96px; border-radius: 22px; border: 2px solid rgba(255,255,255,.25); background: rgba(10,14,19,.6); color: #fff; font-size: 30px; font-weight: 900; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(6px); }
+  .pedal small { font-size: 13px; }
+  .pedal.on { background: rgba(255,180,60,.55); }
+  #garageUI { position: fixed; right: 12px; top: 64px; bottom: 12px; width: min(330px, 44vw); z-index: 6; overflow: auto; background: rgba(10,12,16,.82); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; padding: 12px; display: none; backdrop-filter: blur(8px); }
+  #garageUI h3 { margin: 4px 0 8px; font-size: 16px; color: #f7c66b; }
+  .sw { width: 32px; height: 32px; border-radius: 9px; border: 2px solid rgba(255,255,255,.25); cursor: pointer; }
+  .sw.sel { outline: 3px solid #ffd47a; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .opt { padding: 8px 10px; border-radius: 10px; border: 1px solid #3a4652; background: #1a2530; color: #e8edf2; font-weight: 800; cursor: pointer; font-size: 14px; }
+  .opt.sel { background: linear-gradient(135deg,#ffd47a,#e99a2b); color: #15191e; border-color: #ffd47a; }
+  .opt.lock { opacity: .5; }
+  .note { font-size: 12px; color: #9eacb9; line-height: 1.5; margin: 6px 0 10px; }
+  #toast { position: fixed; left: 50%; top: 70px; transform: translateX(-50%); z-index: 9; background: rgba(10,14,19,.85); border-radius: 12px; padding: 10px 16px; font-weight: 800; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  @media (max-width: 760px) { .pedal { width: 76px; height: 76px; font-size: 24px; } .btn { padding: 7px 9px; font-size: 13px; } #garageUI { top: auto; height: 46vh; width: auto; left: 12px; } }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="bar left">
+  <div class="chip" id="coins">💰 0</div>
+  <div class="chip" id="speed">0 km/h</div>
+</div>
+<div class="bar right">
+  <button class="btn" id="bTime">☀️ 白天</button>
+  <button class="btn" id="bWeather">🌤 晴天</button>
+  <button class="btn" id="bLights">💡 大燈</button>
+  <button class="btn" id="bGarage">🔧 車庫</button>
+  <a class="btn" href="./" style="text-decoration:none">🚛 回 3D 版</a>
+</div>
+<div class="pedals left"><button class="pedal" id="pBrake">◀<small>煞車／倒車</small></button></div>
+<div class="pedals right"><button class="pedal" id="pGas">▶<small>油門</small></button></div>
+<div id="garageUI"></div>
+<div id="toast"></div>
+<script type="module" src="js/side.js"></script>
+</body>
+</html>
