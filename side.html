@@ -8,8 +8,19 @@
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@700;900&display=swap" rel="stylesheet">
 <style>
-  html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; color: #e8edf2; user-select: none; -webkit-user-select: none; touch-action: none; }
+  html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; font-family: "Noto Serif TC", "Songti TC", "PMingLiU", serif; color: #f1e6cf; user-select: none; -webkit-user-select: none; touch-action: none; }
+  /* 毛玻璃＋細金邊＋內發光，滑鼠移上去平滑浮起 */
+  :root { --gold: rgba(214,178,98,.6); --gold-hi: rgba(245,214,140,.95); --ease: cubic-bezier(.22,1,.36,1); }
+  .chip, .btn, .pedal, #garageUI, #toast { background: linear-gradient(160deg, rgba(40,36,30,.42), rgba(12,14,18,.55)) !important; border: 1px solid var(--gold) !important; box-shadow: inset 0 0 14px rgba(255,214,150,.12), inset 0 1px 0 rgba(255,240,200,.25), 0 10px 28px rgba(0,0,0,.4) !important; backdrop-filter: blur(14px) saturate(150%); -webkit-backdrop-filter: blur(14px) saturate(150%); color: #f6e7c8 !important; letter-spacing: .5px; transition: transform .35s var(--ease), box-shadow .35s var(--ease), border-color .35s var(--ease), background .35s var(--ease); }
+  .btn:hover, .pedal:hover, .opt:hover { transform: translateY(-2px); border-color: var(--gold-hi) !important; box-shadow: inset 0 0 18px rgba(255,214,150,.22), 0 0 18px rgba(214,178,98,.35), 0 12px 30px rgba(0,0,0,.45) !important; }
+  .btn.on, .opt.sel { background: linear-gradient(160deg, rgba(214,178,98,.75), rgba(150,108,40,.75)) !important; color: #1a140a !important; border-color: var(--gold-hi) !important; }
+  .opt { transition: transform .35s var(--ease), box-shadow .35s var(--ease), border-color .35s var(--ease); border-color: rgba(214,178,98,.35) !important; background: rgba(20,22,26,.55) !important; color: #f1e6cf !important; font-family: inherit; }
+  .sw { transition: transform .3s var(--ease); } .sw:hover { transform: scale(1.12); }
+  #garageUI h3 { font-weight: 900; letter-spacing: 1px; color: #f3d28d !important; text-shadow: 0 0 10px rgba(214,178,98,.35); }
+  button, a.btn { font-family: inherit; }
   canvas { display: block; width: 100vw; height: 100vh; }
   .bar { position: fixed; top: 10px; display: flex; gap: 8px; z-index: 5; }
   .bar.left { left: 10px; } .bar.right { right: 10px; }
@@ -45,6 +56,7 @@
   <button class="btn" id="bWeather">🌤 晴天</button>
   <button class="btn" id="bLights">💡 大燈</button>
   <button class="btn" id="bGarage">🔧 車庫</button>
+  <button class="btn on" id="bFx">🎞 電影濾鏡</button>
   <a class="btn" href="./" style="text-decoration:none">🚛 回 3D 版</a>
 </div>
 <div class="pedals left"><button class="pedal" id="pBrake">◀<small>煞車／倒車</small></button></div>

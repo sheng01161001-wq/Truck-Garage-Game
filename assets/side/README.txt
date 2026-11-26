@@ -17,3 +17,20 @@ wheel.png       （每顆輪子）             64 × 64（正方形） 輪子，
 小提醒：
 - cab.png、trailer.png 放了以後，車身顏色就以你畫的為準（車庫裡換顏色不會改到圖）。
 - 頭燈光束、煞車燈光暈、陰影、廢氣、天氣都還是程式畫的，會疊在你的圖上面。
+
+==================== 角色序列幀（Sprite Sheet） ====================
+放在 assets/side/sheets/，一組 = 一張 PNG（一格一格排好，由左到右、由上到下）＋同名 JSON（可省略）。
+目前會用到的名字：
+  walker.png / walker.json   人行道上的行人（動作：walk 走路、idle 站著、umbrella 撐傘走路）
+  driver.png / driver.json   駕駛座裡的司機（動作：idle）
+
+JSON 範例（walker.json）：
+{ "frameW": 64, "frameH": 128, "fps": 10,
+  "anims": { "walk": { "from": 0, "to": 7 }, "idle": { "from": 8, "to": 11 }, "umbrella": { "from": 12, "to": 19 } } }
+- frameW／frameH：每一格多寬多高（像素）
+- from／to：這個動作用第幾格到第幾格（從 0 開始數）
+- 沒放 JSON：當作每格是正方形、整張都是 walk
+
+播放方式：相鄰兩格會淡入淡出（比較順），換動作時舊動作慢慢淡掉（動作混合）。
+素材來源可以用 Midjourney、Leonardo.ai 生成去背圖，或 Kenney、itch.io 的免費素材（注意授權）。
+沒放圖就用程式畫的人物。
