@@ -4,15 +4,16 @@ import {
   buildWorld, boxes, DEPOTS, GAS, GARAGE_BLD, SPAWN, SHOWROOM, WORLD, surfaceAt,
   setWet, setSnow, setNight, lampPositions, updateTrafficLights, updateWorldAnim, setShowroomLights, ROADS, hasLight, lightState,
 } from './js/world.js';
-import { buildRig, setTruckLights, loadTruckGLB, setTruckGLB } from './js/truck.js';
+import { buildRig, setTruckLights, loadTruckGLB, setTruckGLB, loadRealTrucks } from './js/truck.js';
 import { createEnv } from './js/env.js';
+import { createRenderer, setupShadows, createPost, updatePost } from './js/graphics.js';
 import { createTraffic } from './js/traffic.js';
 import { Snd } from './js/audio.js';
 import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from './js/hud.js';
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v44';
+const VERSION = 'v45';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -287,18 +288,11 @@ if (!save.flags.q32) { if (save.settings.quality === 'low') save.settings.qualit
 // v43：ULTRA＝高畫質再加 4096 陰影、更細的環境光遮蔽、景深、2 倍解析度
 const QUAL = save.settings.quality, ULTRA = QUAL === 'ultra', HIGH = QUAL === 'high' || ULTRA, LOWQ = QUAL === 'low';
 const canvas = $('#c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, HIGH ? 2 : LOWQ ? 1 : 1.5)); // 手機最高 2 倍
-renderer.shadowMap.enabled = !LOWQ;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap; // 柔和陰影
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+const { renderer, Q: GQ } = createRenderer(canvas, QUAL); // v45：畫質設定集中在 js/graphics.js（GraphicsManager）
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.3, 3000);
 const env = createEnv(renderer, scene);
-if (!HIGH) env.sun.shadow.mapSize.set(1024, 1024);
-if (ULTRA) { env.sun.shadow.mapSize.set(4096, 4096); env.sun.shadow.radius = 2; }
-if (LOWQ) env.sun.castShadow = false;
+setupShadows(env.sun, GQ);
 buildWorld(scene, HIGH ? 'high' : 'low');
 // 車流密度：少／中／多（多的時候路口會塞車）
 const DENSITY = { few: [10, 4], normal: [HIGH ? 22 : 14, HIGH ? 8 : 5], many: [HIGH ? 38 : 26, HIGH ? 12 : 8] }[save.settings.traffic] || [14, 5];
@@ -331,8 +325,11 @@ function rebuildRig(cfg) {
   rig = buildRig(inGarage() ? cfg : { ...cfg, trailerType: curTrailer() }, save.dirt); // v36：開車時拖的是任務的拖車
   S.rigCfg = JSON.stringify(cfg);
   scene.add(rig.tractor, rig.trailer);
+  L = rig.wheelbase || 3.8;
   // v39：駕駛室車內燈（O）
   const dome = new THREE.PointLight(0xffe2b0, 0, 3.4, 1.4); dome.position.copy(rig.camLocal).add(new THREE.Vector3(-0.55, 0.6, -0.2)); rig.cabInner.add(dome); rig.dome = dome;
+  // v45：駕駛座視角的車內補光（白天從車窗進來的光；駕駛室裡面太暗時看不清儀表板）
+  const fill = new THREE.PointLight(0xe4ecff, 0, 3.2, 1.2); fill.position.copy(rig.camLocal).add(new THREE.Vector3(-0.4, 0.35, 0.5)); rig.cabInner.add(fill); rig.fill = fill;
   rig.setLoaded(!!(S.mission && S.mission.stage === 'deliver'));
   S.dirtDrawn = save.dirt;
   placeRig();
@@ -1253,7 +1250,7 @@ function buyPending() {
 const GEARS12 = [14.9, 11.7, 9.1, 7.1, 5.6, 4.4, 3.4, 2.7, 2.1, 1.6, 1.28, 1.0], GEARS14 = [...GEARS12, 0.86, 0.74], FINAL = 2.85, EFF = 0.88, RW = 0.53, R_GEAR = 13;
 let GEARS = GEARS12; // v37：14 速多兩個超速檔
 const ENGINE_MUL = { e450: 1, e550: 1.18, e650: 1.36 };
-const L = 3.8, LT = 10.7, VMAX = 33; // v32：最高約 120 公里（真實聯結車國道約 90～110）
+let L = 3.8; const LT = 10.7, VMAX = 33; // v45：L＝軸距，換成寫實模型時用模型的軸距 // v32：最高約 120 公里（真實聯結車國道約 90～110）
 function torque(rpm) {
   if (rpm < 1000) return 1700 + (rpm - 600) * 2;
   if (rpm <= 1400) return 2500;
@@ -1597,11 +1594,12 @@ function updateCamera(dt) {
     want.set(S.x + Math.sin(a) * 19, 5.5, S.z + 2 + Math.cos(a) * 19); look.set(S.x, 2.4, S.z + 1);
   } else if (S.cam === 2) {
     rig.cab.updateMatrixWorld(true);
-    rig.cabInner.localToWorld(want.copy(rig.camLocal));
+    const bob = S.mode === 'drive' ? Math.sin(S.travelled * 1.3) * 0.006 * Math.min(1, Math.abs(S.v) / 10) + (S.engineOn ? Math.sin(S.time * 55) * 0.0012 * Math.max(0.3, 1 - Math.abs(S.v) / 8) : 0) : 0;
+    rig.cabInner.localToWorld(want.copy(rig.camLocal).add(tmpV.set(-S.roll * 0.35, S.bump * 0.6 + S.suspension * 0.5 + bob, -S.pitch * 0.4))); // v45：頭部跟著顛簸、側傾、點頭微動
     const q = new THREE.Quaternion(); rig.cab.getWorldQuaternion(q);
     const yaw = S.camYawT > 0 ? S.camYaw : 0;
     if (S.camYawT <= 0 && !S.gDrag) S.camPitch *= Math.max(0, 1 - dt * 2); // 放開滑鼠後慢慢回正
-    look.set(Math.sin(yaw) * 10, -0.45 + Math.tan(S.camPitch) * 10, Math.cos(yaw) * 10).applyQuaternion(q).add(want);
+    look.set(Math.sin(yaw) * 10, (rig.realModel ? -1.25 : -0.45) + Math.tan(S.camPitch) * 10, Math.cos(yaw) * 10).applyQuaternion(q).add(want); // 寫實駕駛室：視線往下一點看得到儀表板
     if (S.shake > 0 && save.settings.shake !== false) want.add(tmpV.set((Math.random() - 0.5) * S.shake * 0.25, (Math.random() - 0.5) * S.shake * 0.25, 0));
     camPos.copy(want); camLook.copy(look);
     camera.position.copy(want); camera.lookAt(look); return;
@@ -1695,41 +1693,7 @@ const baseFov = () => { const portrait = window.innerWidth < window.innerHeight;
 
 // ================= v24：畫面後製（高畫質才開）：環境光遮蔽（角落陰影）、發光、邊緣平滑 =================
 let post = null;
-if (!LOWQ && save.settings.post !== false) {
-  Promise.all([
-    import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'),
-    import('three/addons/postprocessing/GTAOPass.js'), import('three/addons/postprocessing/UnrealBloomPass.js'),
-    import('three/addons/postprocessing/OutputPass.js'), import('three/addons/postprocessing/ShaderPass.js'),
-    import('three/addons/shaders/VignetteShader.js'),
-  ]).then(async ([{ EffectComposer }, { RenderPass }, { GTAOPass }, { UnrealBloomPass }, { OutputPass }, { ShaderPass }, { VignetteShader }]) => {
-    const w = window.innerWidth, h = window.innerHeight;
-    const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: HIGH ? 4 : 2 });
-    const composer = new EffectComposer(renderer, rt);
-    composer.setPixelRatio(Math.min(renderer.getPixelRatio(), ULTRA ? 2 : HIGH ? 1.5 : 1.25));
-    composer.setSize(w, h);
-    composer.addPass(new RenderPass(scene, camera));
-    let gtao = null;
-    if (HIGH) { // 輕微的環境光遮蔽（角落、車底比較暗）
-      gtao = new GTAOPass(scene, camera, w, h);
-      gtao.updateGtaoMaterial({ radius: 1.2, distanceExponent: 1.6, thickness: 2.0, scale: 1.0, samples: ULTRA ? 16 : 12 });
-      gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
-      gtao.blendIntensity = ULTRA ? 0.75 : 0.6;
-      composer.addPass(gtao);
-    }
-    const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.45, 1.6); // 車燈、路燈這種很亮的東西會發光（晚上會加強）
-    composer.addPass(bloom);
-    let bokeh = null;
-    if (ULTRA) { // 景深：對焦在卡車，遠景稍微柔一點（駕駛座不開）
-      const { BokehPass } = await import('three/addons/postprocessing/BokehPass.js');
-      bokeh = new BokehPass(scene, camera, { focus: 20, aperture: 0.00012, maxblur: 0.006 }); composer.addPass(bokeh);
-    }
-    composer.addPass(new OutputPass());
-    const vignette = new ShaderPass(VignetteShader); // 暗角：畫面四周稍微暗一點，像電影鏡頭
-    vignette.uniforms.offset.value = 1.0; vignette.uniforms.darkness.value = 1.15;
-    composer.addPass(vignette);
-    post = { composer, gtao, bloom, vignette, bokeh, slow: 0, setSize(a, b) { composer.setSize(a, b); } };
-  }).catch((e) => console.warn('後製效果載入失敗，用一般畫面：', e));
-}
+if (save.settings.post !== false) createPost(renderer, scene, camera, GQ).then((p) => { post = p; }).catch((e) => console.error('後製效果載入失敗，用一般畫面：', e));
 // 數位後照鏡（駕駛座視角才顯示）：畫面左右上方各一個小畫面
 // 0、1＝主後照鏡；2、3＝下面的廣角鏡（看得比較寬、比較近，低畫質不畫）
 const MIRROR_N = LOWQ ? 2 : 4;
@@ -1887,7 +1851,7 @@ function frame(dt) {
   if (S.wipers && S.mode === 'drive') { const ph = Math.floor(S.wiperT / Math.PI); if (ph !== S.wiperPh) { S.wiperPh = ph; Snd.wiper(S.cam === 2); } } // v37：雨刷刷過去的聲音
   if (env.state.thunder) { env.state.thunder = false; if (S.mode !== 'title') Snd.thunder(env.state.thunderDist || 0.5); }
   const wa = S.wipers ? (1 - Math.cos(S.wiperT)) * 0.85 : Math.max(0, rig.wipers[0].rotation.z * -1 - dt * 3) ;
-  rig.wipers.forEach((w) => (w.rotation.z = -wa));
+  rig.wipers.forEach((w) => { w.rotation.z = -wa; if (w.userData.realWiper) w.visible = wa > 0.02; }); // 寫實模型：雨刷在動才顯示會動的那支
   // 方向燈閃爍
   if (S.ind) { S.blinkT += dt; const b = (S.blinkT % 0.8) < 0.4; if (b !== S.blink) { S.blink = b; Snd.tick(b); } } else S.blink = false;
   const braking = S.mode === 'drive' && ((input.down && S.gear > 0) || (input.up && S.gear < 0) || Math.abs(S.v) < 0.05);
@@ -1895,10 +1859,13 @@ function frame(dt) {
   const lightsOn = S.lights && !inGarage();
   rig.spots.forEach((s) => { s.intensity = lightsOn ? (S.highBeam ? 1500 : 900) : 0; s.distance = S.highBeam ? 160 : 90; s.angle = S.highBeam ? 0.42 : 0.5; });
   if (rig.dome) rig.dome.intensity = S.dome && !inGarage() ? 2.4 : 0;
+  if (rig.fill) rig.fill.intensity = S.mode === 'drive' && S.cam === 2 ? 1.1 * (1 - env.state.night) + 0.15 : 0;
   if (S.mode === 'drive' && Math.abs(S.v) > 20) S.shake = Math.max(S.shake, (Math.abs(S.v) - 20) * 0.004); // v39：高速時鏡頭輕微震動
   // v32：大燈光錐＋照在路面上的光斑（越暗越明顯；下雨霧天光錐更清楚）
   const beamK = lightsOn && S.mode === 'drive' ? clamp(env.state.night * 1.1 + (env.state.weather === 'fog' || rainyW(env.state.weather) ? 0.25 : 0), 0, 1) : 0;
-  for (const b of rig.beams) { b.visible = beamK > 0.02; b.material.opacity = b.userData.base * beamK * (S.highBeam ? 1.25 : 1); b.scale.set(1, S.highBeam ? 1.5 : 1, 1); }
+  // 鏡頭在車頭前面（車頭視角）時光錐調淡，不然整個畫面白掉
+  const camAhead = (camera.position.x - S.x) * Math.sin(S.heading) + (camera.position.z - S.z) * Math.cos(S.heading) > rig.frontZ;
+  for (const b of rig.beams) { b.visible = beamK > 0.02; b.material.opacity = b.userData.base * beamK * (S.highBeam ? 1.25 : 1) * (camAhead && b.userData.base < 0.3 ? 0.18 : 1); b.scale.set(1, S.highBeam ? 1.5 : 1, 1); }
   if (rig.chameleon) { const c = new THREE.Color().setHSL((S.time * 0.08) % 1, 0.85, 0.5); rig.paint.color.copy(c); rig.paintPlain.color.copy(c); if (rig.rimMat) rig.rimMat.color.copy(c); }
   if (rig.rainbowGlow) { const c = new THREE.Color().setHSL((S.time * 0.5) % 1, 1, 0.55); rig.glowMat.color.copy(c); rig.glowLight.color.copy(c); }
   // 紅綠燈、車流、路燈光
@@ -1934,8 +1901,7 @@ function frame(dt) {
     // 太慢（平均一格超過 30 毫秒）：先關掉角落陰影
     if (S.time > 8) post.slow = post.slow * 0.99 + (dt > 0.03 ? 1 : 0) * 0.01; // 開始玩 8 秒後才算，載入時的卡頓不算
     if (post.slow > 0.75 && post.gtao && post.gtao.enabled) { post.gtao.enabled = false; console.info('畫面太慢，關掉環境光遮蔽'); }
-    post.bloom.strength = 0.3 + env.state.night * 0.55; // 晚上車燈路燈的光暈比較明顯
-    if (post.bokeh) { const u = post.bokeh.uniforms; u.focus.value = camera.position.distanceTo(focus) || 20; u.maxblur.value = S.cam === 2 || inGarage() ? 0 : 0.006; }
+    updatePost(post, { night: env.state.night, focusDist: camera.position.distanceTo(focus), cabView: S.cam === 2 || inGarage() });
     post.composer.render(dt);
   } else renderer.render(scene, camera);
   renderMirrors();
@@ -1984,7 +1950,44 @@ function perfTick(realDt) {
   else if (fpsEma > 1 / 24 && HIGH && !S.qWarned && S.time > 30) { S.qWarned = true; toast(`畫面有點卡：可以到「⚙️ 設定」把畫質調低一級（目前 ${ULTRA ? 'ULTRA' : 'HIGH'}）`, 4000); }
   else if (fpsEma < 1 / 50 && pr < prBase && prT > 6) { pr = Math.min(prBase, pr + 0.1); prT = 0; applyPR(); }
 }
-function applyPR() { renderer.setPixelRatio(pr); if (post) post.composer.setPixelRatio(Math.min(pr, HIGH ? 1.5 : 1.25)); resize(); }
+function applyPR() { renderer.setPixelRatio(pr); if (post) post.composer.setPixelRatio(Math.min(pr, GQ.postPR)); resize(); }
+// ---- v45：畫質測試場景：同一台卡車在 6 種情境下拍照、量效能 ----
+async function runQualityTest() {
+  if (S.mode !== 'drive') { if (S.mode === 'title') startDriving(); else { toast('先回到開車畫面再測', 1500); return; } }
+  closeMenu(); toast('📸 畫質測試中，約 20 秒，請不要操作…', 3000);
+  const keep = { time: save.settings.time, weather: save.settings.weather, cam: S.cam, x: S.x, z: S.z, y: S.y, h: S.heading, th: S.trailerHeading, lights: S.lights, lm: S.lightsManual };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const fps = (ms) => Promise.race([new Promise((r) => { let n = 0; const t0 = performance.now(); const tick = () => { n++; if (performance.now() - t0 < ms) requestAnimationFrame(tick); else r(n * 1000 / (performance.now() - t0)); }; requestAnimationFrame(tick); }), new Promise((r) => setTimeout(() => r(null), ms + 600))]); // 分頁在背景時量不到 FPS
+  const hp = HW_PTS[Math.floor(HW_PTS.length * 0.22)], hp2 = HW_PTS[Math.floor(HW_PTS.length * 0.22) + 3];
+  const scenes = [
+    { n: '晴天白天', time: 'day', weather: 'clear', cam: 0 },
+    { n: '黃昏', time: 'dusk', weather: 'clear', cam: 5 },
+    { n: '夜間', time: 'night', weather: 'clear', cam: 4, lights: true },
+    { n: '大雨', time: 'day', weather: 'heavy', cam: 0, lights: true },
+    { n: '高速公路', time: 'day', weather: 'clear', cam: 0, hw: true },
+    { n: '駕駛室內部', time: 'day', weather: 'clear', cam: 2 },
+  ];
+  const res = [];
+  for (const sc of scenes) {
+    save.settings.time = sc.time; save.settings.weather = sc.weather; S.lightsManual = !!sc.lights; if (sc.lights) S.lights = true; applyEnv();
+    if (sc.hw && hp && hp2) { S.x = hp.x; S.z = hp.z; S.heading = S.trailerHeading = Math.atan2(hp2.x - hp.x, hp2.z - hp.z); S.y = groundAt(S.x, S.z); } else { S.x = keep.x; S.z = keep.z; S.y = keep.y; S.heading = keep.h; S.trailerHeading = keep.th; }
+    S.v = 0; S.cam = sc.cam; camInit = false; S.cine = null;
+    await wait(900);
+    const f = await fps(1500);
+    // 一格的實際花費時間（CPU＋送出 GPU），跟螢幕更新率無關
+    const t0 = performance.now(); for (let i = 0; i < 10; i++) frame(1 / 60); const ms = (performance.now() - t0) / 10;
+    renderer.info.autoReset = false; renderer.info.reset(); frame(1 / 60); const info = { ...renderer.info.render }; renderer.info.autoReset = true; // 一整格（含後製、後照鏡）的繪製次數
+    let img = ''; try { if (post) post.composer.render(0); else renderer.render(scene, camera); const c = document.createElement('canvas'); c.width = 320; c.height = 180; c.getContext('2d').drawImage(renderer.domElement, 0, 0, 320, 180); img = c.toDataURL('image/jpeg', 0.8); } catch (e) { img = ''; }
+    res.push({ n: sc.n, fps: f == null ? '—' : Math.round(f), ms: ms.toFixed(1), calls: info.calls, tris: info.triangles, img });
+  }
+  // 還原
+  Object.assign(save.settings, { time: keep.time, weather: keep.weather }); S.lights = keep.lights; S.lightsManual = keep.lm; applyEnv();
+  Object.assign(S, { x: keep.x, z: keep.z, y: keep.y, heading: keep.h, trailerHeading: keep.th, cam: keep.cam }); camInit = false;
+  window.__qtest = res.map(({ img, ...r }) => r);
+  openMenu('settings');
+  const out = $('#qtestOut');
+  if (out) out.innerHTML = `<div class="qtest">${res.map((r) => `<figure>${r.img ? `<img src="${r.img}" alt="${r.n}">` : ''}<figcaption><b>${r.n}</b>　${r.fps} FPS　每格 ${r.ms} 毫秒　繪製 ${r.calls} 次　${(r.tris / 1000).toFixed(0)}k 三角形</figcaption></figure>`).join('')}</div><div class="studio-note">畫質：${GQ.label}　解析度倍率 ${renderer.getPixelRatio().toFixed(2)}　顯示卡記憶體：貼圖 ${renderer.info.memory.textures} 張、模型 ${renderer.info.memory.geometries} 個</div>`;
+}
 // ---- 新手教學 ----
 const TUT = [
   { t: '按住 ↑（平板按右下「油門」）往前開', ok: () => S.v > 3 },
@@ -2072,7 +2075,9 @@ function renderMenu() {
       <div class="set-row"><span>車流</span><div class="opts">${opt('traffic', 'few', '少')}${opt('traffic', 'normal', '中')}${opt('traffic', 'many', '多')}</div></div>
       <div class="set-row"><span>駕駛座後照鏡</span><div class="opts">${opt('mirrors', true, '開')}${opt('mirrors', false, '關')}</div></div>
       <div class="set-row"><span>顯示 FPS（畫面順不順）</span><div class="opts">${opt('fps', true, '開')}${opt('fps', false, '關')}</div></div>
-      <div class="studio-note">畫面太卡時，遊戲會自動把解析度調低一點，順了再調回來。</div>`;
+      <div class="studio-note">畫面太卡時，遊戲會自動把解析度調低一點，順了再調回來。</div>
+      <button class="big-act" data-act="qtest">📸 畫質測試（晴天、黃昏、夜間、大雨、高速公路、駕駛室）</button>
+      <div id="qtestOut"></div>`;
   } else if (menuTab === 'save') {
     h += `<div class="studio-note">遊戲會自動存檔在這台裝置上。要換電腦或平板玩，先「匯出存檔」，到新的裝置再「匯入存檔」。</div>
       <div class="studio-note"><b>手動存檔位</b>（遊戲本身每次有變化都會自動存檔）</div>
@@ -2088,7 +2093,8 @@ function renderMenu() {
       <div><kbd>M</kbd> 世界地圖　<kbd>Esc</kbd> 遊戲選單</div>
       <div><kbd>T</kbd> 換時間　<kbd>Y</kbd> 換天氣　<kbd>G</kbd> 改裝廠　<kbd>N</kbd> 聲音　<kbd>Backspace</kbd> 回廠</div>
       <div class="tip">平板手機用畫面上的按鈕。按「📋 接單」到貨運市場挑貨物 → 開到裝貨區倒車接拖車（F）→ 跟著橘色導航線送到卸貨區停好就會自動卸貨。</div></div>
-      <button class="big-act gold" data-act="tutorial">🎓 重新開始新手教學</button>`;
+      <button class="big-act gold" data-act="tutorial">🎓 重新開始新手教學</button>
+      <div class="studio-note">素材授權：卡車模型 "Tractor Unit"、"Long-Nose Truck" by vinish.dev（CC BY 4.0）；材質、天空 Poly Haven、ambientCG（CC0）；路上車輛 Kenney（CC0）；聲音 Pixabay。完整清單見 ASSET_CREDITS.md。</div>`;
   }
   $('#menuBody').innerHTML = h;
 }
@@ -2134,6 +2140,7 @@ $('#menuBody').addEventListener('click', (e) => {
     if (!d || !d.save) { toast('這個存檔位是空的', 1200); return; }
     if (!confirm(`讀取存檔位 ${n}？目前沒存的進度會被取代。`)) return;
     localStorage.setItem(SAVE_KEY, JSON.stringify(d.save)); location.reload();
+  } else if (act === 'qtest') { runQualityTest();
   } else if (act === 'money') { menuTab = 'money'; renderMenu();
   } else if (act === 'resume') { closeMenu();
   } else if (act === 'jobs') { closeMenu(); openJobs();
@@ -2164,7 +2171,13 @@ newMission();
 setTruckGLB(save.settings.glb !== false);
 rebuildRig(save.truck);
 // v32：Blender 做的 GLB 車頭背景載入，載好換上（載不到就維持程式畫的）
-if (save.settings.glb !== false) loadTruckGLB().then((ok) => { if (ok) rebuildRig(inGarage() ? draft : save.truck); });
+if (save.settings.glb !== false) {
+  // v45：寫實卡車模型（tractor-unit／long-nose，CC BY 4.0）＋Blender 模型，背景載入，載好換上；低畫質只用 Blender 模型（比較輕）
+  Promise.all([loadTruckGLB(), LOWQ ? Promise.resolve(false) : loadRealTrucks()]).then(([a, b]) => {
+    if (a || b) rebuildRig(inGarage() ? draft : save.truck);
+    if (!b && !LOWQ) toast('寫實卡車模型載入失敗，先用簡單模型（請檢查網路）', 3000);
+  });
+}
 applyEnv();
 resize();
 updateCoins();

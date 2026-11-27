@@ -15,16 +15,20 @@ export function createEnv(renderer, scene) {
   const envScene = new THREE.Scene(); const envSky = new Sky(); envSky.scale.setScalar(2000); envScene.add(envSky);
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null;
-  // 實拍天空（Poly Haven，CC0）：背景載入，載到前先用程式天空；載不到就一直用程式天空
-  let hdrEnv = null;
-  import('three/addons/loaders/RGBELoader.js')
-    .then(({ RGBELoader }) => new RGBELoader().loadAsync('textures/sky_partly_cloudy_1k.hdr'))
-    .then((hdr) => {
+  // v45：每個時段自己的實拍 HDRI（Poly Haven，CC0）：反射、環境光；黃昏和陰天也當背景天空
+  const HDR_FILES = { day: 'textures/sky_partly_cloudy_1k.hdr', dusk: 'public/assets/hdri/qwantani_dusk_2_puresky_1k.hdr', night: 'public/assets/hdri/dikhololo_night_1k.hdr', overcast: 'public/assets/hdri/kloofendal_overcast_puresky_1k.hdr' };
+  const HDR = {}, HDR_BG = {}, hdrLoading = {};
+  let hdrEnv = null; // 舊程式用：有任何一張載好就不是 null
+  function loadHdr(key) {
+    if (HDR[key] || hdrLoading[key]) return;
+    hdrLoading[key] = import('three/addons/loaders/RGBELoader.js').then(({ RGBELoader }) => new RGBELoader().loadAsync(HDR_FILES[key])).then((hdr) => {
       hdr.mapping = THREE.EquirectangularReflectionMapping;
-      hdrEnv = pmrem.fromEquirectangular(hdr).texture; hdr.dispose();
+      HDR[key] = pmrem.fromEquirectangular(hdr).texture; HDR_BG[key] = hdr; hdrEnv = hdrEnv || HDR[key];
       if (state.time) apply(state.time, state.weather);
-    })
-    .catch((e) => console.warn('實拍天空載入失敗，用程式天空：', e));
+    }).catch((e) => console.error('HDRI 載入失敗（改用程式天空）：', HDR_FILES[key], e));
+  }
+  const hdrKey = (time, weather, P) => P.night >= 0.7 ? 'night' : ['overcast', 'rain', 'heavy', 'storm', 'fog', 'snow'].includes(weather) ? 'overcast' : (time === 'dusk' || time === 'dawn' || P.night > 0.3) ? 'dusk' : 'day';
+  loadHdr('day');
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffffff, 3);
@@ -135,14 +139,19 @@ export function createEnv(renderer, scene) {
     if (regen) {
       if (envRT) envRT.dispose();
       envRT = null;
-      if (hdrEnv && P.night < 0.7) scene.environment = hdrEnv;
+      const key = hdrKey(time, weather, P); loadHdr(key); state.hdrKey = key;
+      if (HDR[key]) scene.environment = HDR[key];
       else {
         envSky.visible = true;
         envRT = pmrem.fromScene(envScene, 0, 0.1, 3000);
         scene.environment = envRT.texture;
       }
+      // 黃昏、陰天：天空直接用實拍照片（雲比較真）；起霧、晚上不用
+      const bgOk = (key === 'dusk' || key === 'overcast') && HDR_BG[key] && !foggy && P.night < 0.7;
+      if (bgOk) { scene.background = HDR_BG[key]; scene.backgroundIntensity = key === 'dusk' ? 0.9 : (rainy || snowy ? 0.55 : 0.8); sky.visible = false; }
+      else if (scene.background && scene.background.isTexture) { scene.background = nightish ? fc.clone() : null; sky.visible = !nightish; }
     }
-    scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1) * (hdrEnv && P.night < 0.7 ? (rainy || foggy || snowy ? 0.6 : over ? 0.75 : 1) * (1 - P.night * 0.9) : 1);
+    scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1) * (HDR[state.hdrKey] ? (state.hdrKey === 'night' ? 1.4 : state.hdrKey === 'overcast' ? (rainy || foggy || snowy ? 0.7 : 0.9) : 1 - P.night * 0.6) : 1);
     state.hemiBase = hemi.intensity; state.envBase = scene.environmentIntensity;
     if (regen) { for (let i = 0; i < RAIN; i++) resetDrop(i, 0, 0, 0, true); for (let i = 0; i < SNOW; i++) resetFlake(i, 0, 0, 0, true); }
     return state;

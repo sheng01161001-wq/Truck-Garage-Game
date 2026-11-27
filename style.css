@@ -372,3 +372,6 @@ body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: non
 }
 
 @media (prefers-reduced-motion: reduce) { .title-box, .tmenu .ti, #menuPanel:not(.hidden), #jobPanel:not(.hidden) { animation: none !important; } }
+
+/* v45：畫質測試結果 */
+.qtest { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; } .qtest figure { margin: 0; background: #15181c; border-radius: 10px; overflow: hidden; } .qtest img { width: 100%; display: block; } .qtest figcaption { font-size: 12px; padding: 6px 8px; color: #c9d1d9; }

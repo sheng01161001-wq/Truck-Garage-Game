@@ -4,9 +4,9 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng, makeNoise, clamp, canvasTex, FONT } from './util.js';
 import {
-  asphaltTex, noiseBumpTex, concreteTex, grassTex, facadeTex, photoMap, photoDetail, corrugatedTex, boardTex, gravelTex, fieldTex, stripeTex, ledTex,
+  asphaltTex, noiseBumpTex, concreteTex, grassTex, facadeTex, photoMap, photoDetail, corrugatedTex, boardTex, gravelTex, fieldTex, stripeTex, ledTex, pbrDetail,
 } from './textures.js';
-import { naturalHeight, terrainHeight, buildHighway, LUMBER, nearHighway, inCity, isInterchangeRoad, PIERS } from './highway.js';
+import { naturalHeight, terrainHeight, buildHighway, LUMBER, nearHighway, inCity, isInterchangeRoad, PIERS, GATES } from './highway.js';
 import { nearStruct, buildElevated } from './elevated.js';
 
 export const ROADS = [-400, -240, -80, 80, 240, 400];
@@ -191,7 +191,7 @@ export function buildWorld(scene, quality) {
     const sea = new THREE.Mesh(new THREE.PlaneGeometry(2600, 3200), seaMat); sea.rotation.x = -Math.PI / 2; sea.position.set(-472 - 1300, 0.05, 0); sea.receiveShadow = true; root.add(sea);
     const sandM = stdMat({ map: gravelTex([206, 190, 150]), roughness: 1 }); sandM.map.repeat.set(4, 120);
     const beach = new THREE.Mesh(new THREE.PlaneGeometry(14, 1080), sandM); beach.rotation.x = -Math.PI / 2; beach.position.set(-466, 0.035, 0); beach.receiveShadow = true; root.add(beach);
-    const wallM = stdMat({ map: concreteTex(), color: 0xb8b3a8, roughness: 0.9 });
+    const wallM = pbrDetail(stdMat({ map: concreteTex(), color: 0xb8b3a8, roughness: 0.9 }), 'public/assets/textures/Concrete047A', 2, 2, 0.8);
     mesh(new THREE.BoxGeometry(1.2, 1.2, 1080), wallM, -472.6, 0.2, 0, root);
     // 貨輪（停在碼頭外面）
     const hullM = stdMat({ color: 0x1b2a3a, roughness: 0.6, metalness: 0.3 }), redM = stdMat({ color: 0x8e1b1b, roughness: 0.7 }), whiteM = stdMat({ color: 0xeeeeee, roughness: 0.5 });
@@ -239,7 +239,7 @@ export function buildWorld(scene, quality) {
   for (const kind of ['city', 'highway', 'plain']) {
     const t = asphaltTex(kind);
     const m = stdMat({ map: t, bumpMap: bump, bumpScale: 1.2, roughness: 0.88 });
-    photoDetail(m, 'asphalt_02', 14 / 3, 28 / 3, 0.8);   // 實拍柏油的凹凸（照片 3 公尺見方）
+    pbrDetail(m, 'public/assets/roads/Road012A', 4, 8, 1.1);   // v45：ambientCG 磨損柏油的凹凸、粗糙度、環境遮蔽（照片 3.5 公尺見方）
     wetMats.push({ mat: m, dry: 0.88, wet: 0.12, dryColor: new THREE.Color(1, 1, 1), wetColor: new THREE.Color(0.55, 0.56, 0.6) });
     roadMat[kind] = m;
   }
@@ -677,6 +677,7 @@ export function buildWorld(scene, quality) {
     const torusTires = [];
     for (let k = 0; k < 4; k++) torusTires.push(mesh(new THREE.TorusGeometry(0.42, 0.18, 10, 24).rotateX(Math.PI / 2), tireM, 13, 0.2 + k * 0.36, -20, g));
     for (let k = 0; k < 3; k++) torusTires.push(mesh(new THREE.TorusGeometry(0.42, 0.18, 10, 24).rotateX(Math.PI / 2), tireM, 14.2, 0.2 + k * 0.36, -18.6, g));
+    torusTires.forEach((t) => (t.userData.dynamic = true)); // 道具模型載好會藏起來：不要合併
     // 實拍道具（Poly Haven，CC0，models/props/）：背景載入，載不到就維持原樣
     // [檔名, x, z, 轉向, 放在多高, 放大倍數, 平放（輪胎）]
     const PROPS = [
@@ -712,5 +713,38 @@ export function buildWorld(scene, quality) {
     }
   }
 
+  // v45：靜態物件合併（同材質、同 200 公尺一區合成一個，畫面外照樣不畫）：繪製次數從幾千次降到幾百次
+  const skip = new Set([...anim.blades, ...anim.smoke, ...puddles, ...GATES.map((g) => g.mesh).filter(Boolean)]);
+  batchStatic(root, skip);
   return root;
+}
+function batchStatic(root, skip) {
+  const CELL = 200, buckets = new Map();
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(), c = new THREE.Vector3();
+  root.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !o.visible || o.userData.dynamic) return;
+    for (let q = o; q && q !== root; q = q.parent) { if (skip.has(q) || !q.visible || q.userData.dynamic) return; }
+    const m = o.material, g = o.geometry;
+    if (Array.isArray(m) || m.transparent || !g.attributes.position || g.morphAttributes.position) return;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    c.copy(g.boundingSphere.center).applyMatrix4(o.matrixWorld);
+    const sig = Object.keys(g.attributes).sort().map((k) => k + g.attributes[k].itemSize).join(',') + (g.index ? 'i' : 'n');
+    const key = `${m.uuid}|${sig}|${o.castShadow ? 1 : 0}${o.receiveShadow ? 1 : 0}|${Math.floor(c.x / CELL)},${Math.floor(c.z / CELL)}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(o);
+  });
+  let before = 0, after = 0;
+  for (const list of buckets.values()) {
+    before += list.length;
+    if (list.length < 2) { after++; continue; }
+    const geos = list.map((o) => { const gg = o.geometry.clone(); gg.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld)); return gg; });
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((gg) => gg.dispose());
+    if (!merged) { after += list.length; continue; }
+    const mesh = new THREE.Mesh(merged, list[0].material); mesh.castShadow = list[0].castShadow; mesh.receiveShadow = list[0].receiveShadow;
+    root.add(mesh); after++;
+    for (const o of list) o.parent.remove(o);
+  }
+  console.info(`靜態物件合併：${before} 個 → ${after} 個`);
 }

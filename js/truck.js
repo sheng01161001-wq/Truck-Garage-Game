@@ -61,6 +61,21 @@ export function loadTruckGLB(url = 'models/truck/truck.glb') {
     .catch(() => false);
 }
 export function setTruckGLB(on) { glbOn = !!on; }
+// ---------- v45：寫實卡車模型（vinish.dev，CC BY 4.0，見 ASSET_CREDITS.md） ----------
+// 模型座標：車頭朝 +Z、+X＝左邊（左駕）、輪子半徑 0.52。rearZ＝後軸中心，對齊遊戲的物理原點（後軸）
+const REAL_SPEC = {
+  euro: { url: 'public/assets/trucks/tractor-unit.glb', rearZ: -2.65, frontAxle: 0.95, paint: 'Paint_Blue', eye: [0.66, 2.44, 0.93], mirror: [1.45, 2.45, 2.3], front: 2.54, roof: 3.69, cabBack: -0.27, head: [0.95, 0.74, 2.31], tail: [0.95, 0.82, -3.45], wiperY: 1.88, wiperZ: 2.36, cornerX: 1.2 },
+  us: { url: 'public/assets/trucks/long-nose-truck.glb', rearZ: -2.41, frontAxle: 2.75, paint: 'Paint_Maroon', eye: [0.52, 2.38, 0.48], mirror: [1.25, 2.08, 1.65], front: 3.78, roof: 3.65, cabBack: -1.02, head: [0.95, 1.05, 3.6], tail: [0.95, 0.84, -3.98], wiperY: 1.86, wiperZ: 1.72, cornerX: 1.12 },
+};
+const REAL = {};
+let realTried = false;
+export function loadRealTrucks() {
+  realTried = true;
+  return import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => Promise.all(Object.entries(REAL_SPEC).map(([k, sp]) =>
+    new GLTFLoader().loadAsync(sp.url).then((g) => { REAL[k] = g.scene; }).catch((e) => { console.error('寫實卡車模型載入失敗：', sp.url, e); })
+  ))).then(() => Object.keys(REAL).length > 0);
+}
+export function realTruckReady(style) { return !!REAL[style === 'us' ? 'us' : 'euro']; }
 export function truckGLBReady() { return !!GLB; }
 const GLB_SKIP = /^(windshield|sidewin|sleeperwin|headlight|indicator|rail|fifthwheel|axle|faxle|rear_fender|mudflap|airtank)$/;
 const GLB_KIT = { kit_bumper_chromeb: (c) => c.bumper === 'chromeb', kit_bumper_bull: (c) => c.bumper === 'bull', kit_spoiler: (c) => c.spoiler === 'on', kit_lightbar: (c) => c.lightbar === 'on', kit_visor: (c) => c.visor === 'on', kit_stacks: (c) => c.stacks === 'on', kit_skirts: (c) => c.skirts === 'on' };
@@ -336,7 +351,9 @@ export function buildRig(cfg, dirt = 0) {
   const US = cfg.cabStyle === 'us';
   const cham = cfg.paint === 'chameleon';
   // 歐式車頭、沒有彩繪圖案／自訂貼圖時用 GLB 模型（圖案要貼在程式畫的車殼上才對得準）
-  const G = !!GLB && glbOn && !US && (cfg.pattern || 'none') === 'none' && !cfg.cabDecalData;
+  // v45：寫實模型優先（沒有彩繪圖案、自訂貼圖時）；載不到才用 Blender 模型／程式模型
+  const realKey = US ? 'us' : 'euro', RS = glbOn && REAL[realKey] && (cfg.pattern || 'none') === 'none' && !cfg.cabDecalData ? REAL_SPEC[realKey] : null;
+  const G = !RS && !!GLB && glbOn && !US && (cfg.pattern || 'none') === 'none' && !cfg.cabDecalData;
   const base = cham ? '#ffffff' : cfg.cabColor;
   const cabS = surface(512, 512, (ctx, w, h, redraw) => { fillPaint(ctx, w, h, base, cfg.cabColor2, cfg.cabGradient); drawPattern(ctx, w, h, cfg.pattern, cfg.patternColor); drawArtwork(ctx,w,h,cfg,'cab',redraw); });
   const plainS = surface(64, 64, (ctx, w, h) => { fillPaint(ctx, w, h, base, cfg.cabColor2, cfg.cabGradient); });
@@ -649,6 +666,7 @@ export function buildRig(cfg, dirt = 0) {
   for (const sx of [1, -1]) {
     const sp = new THREE.SpotLight(HEAD_COL[cfg.headlight] || 0xfff2dd, 0, 90, 0.5, 0.55, 1.2);
     sp.position.set(sx * 0.9, hy, hz); sp.target.position.set(sx * 1.5, 0, hz + 30);
+    sp.userData.keep = sp.target.userData.keep = true;
     C.add(sp, sp.target); spots.push(sp);
   }
   // v32：晚上看得到的大燈光錐（從燈往前斜下打到路面）＋路面上的光斑
@@ -661,11 +679,11 @@ export function buildRig(cfg, dirt = 0) {
     const cone = new THREE.Mesh(cg, beamMat(0.1, coneTex)); cone.userData.base = 0.1;
     cone.position.set(sx * 0.9, hy, hz + 0.05);
     cone.rotation.x = -Math.PI / 2 + Math.atan2(hy - 0.1, len * 0.95); // 往前、慢慢往下碰到地面
-    cone.renderOrder = 3; cone.visible = false; cone.castShadow = false; C.add(cone); beams.push(cone);
+    cone.renderOrder = 3; cone.visible = false; cone.castShadow = false; cone.userData.keep = true; C.add(cone); beams.push(cone);
   }
   const pg = new THREE.PlaneGeometry(7.5, 22); geos.push(pg); pg.rotateX(-Math.PI / 2);
   const pool = new THREE.Mesh(pg, beamMat(0.45, poolTex)); pool.userData.base = 0.45;
-  pool.position.set(0, 0.06, hz + 13); pool.renderOrder = 2; pool.visible = false; tractor.add(pool); beams.push(pool);
+  pool.position.set(0, 0.06, hz + 13); pool.renderOrder = 2; pool.visible = false; pool.userData.keep = true; tractor.add(pool); beams.push(pool);
 
   // v37：車側燈（車頭、拖車側邊下緣一排 LED）
   const SIDE_COL = { amber: 0xffa020, white: 0xf2f6ff, blue: 0x3aa0ff }[cfg.sidelights];
@@ -687,8 +705,67 @@ export function buildRig(cfg, dirt = 0) {
     glowMat = new THREE.MeshBasicMaterial({ color: GLOW_COLORS[cfg.glow], transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending });
     own.push(glowMat);
     const gg = new THREE.PlaneGeometry(3.4, 8); geos.push(gg);
-    const g = new THREE.Mesh(gg, glowMat); g.rotation.x = -Math.PI / 2; g.position.set(0, 0.06, 2); tractor.add(g);
-    glowLight = new THREE.PointLight(GLOW_COLORS[cfg.glow], 25, 10, 1.6); glowLight.position.set(0, 0.45, 2); tractor.add(glowLight);
+    const g = new THREE.Mesh(gg, glowMat); g.rotation.x = -Math.PI / 2; g.position.set(0, 0.06, 2); g.userData.keep = true; tractor.add(g);
+    glowLight = new THREE.PointLight(GLOW_COLORS[cfg.glow], 25, 10, 1.6); glowLight.position.set(0, 0.45, 2); glowLight.userData.keep = true; tractor.add(glowLight);
+  }
+
+  // ================= v45：換成寫實卡車模型 =================
+  let wheelbase = 3.8, frontZ = US ? 6.6 : 5.7, mirrorLocal = US ? [new THREE.Vector3(1.5, 3.4, 3.2), new THREE.Vector3(-1.5, 3.4, 3.2)] : [new THREE.Vector3(1.45, 3.3, 5.1), new THREE.Vector3(-1.45, 3.3, 5.1)];
+  if (RS) {
+    const off = -RS.rearZ, zz = (z) => z + off;
+    // 拿掉程式畫的車頭、車殼、內裝、輪子（保留車燈光、光錐、底盤燈）
+    for (const ch of [...tractor.children]) if (ch !== cab && !ch.userData.keep) tractor.remove(ch);
+    for (const ch of [...C.children]) if (!ch.userData.keep) C.remove(ch);
+    front.length = 0; spins.length = 0; windshield.length = 0; wipers.length = 0;
+    const src = REAL[realKey].clone(true);
+    const offC = new THREE.Group(); offC.position.z = off; C.add(offC);
+    const offT = new THREE.Group(); offT.position.z = off; tractor.add(offT);
+    const rimFor = cfg.rims === 'std' ? null : rimMat;
+    screenMats.cluster = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }); own.push(screenMats.cluster);
+    screenMats.nav = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }); own.push(screenMats.nav);
+    const swap = (mt) => {
+      const n = mt.name;
+      if (n === RS.paint || n === 'Stripe_Gold' && false) return paintPlain;
+      if (n === 'Lens' || n === 'Projector') return m.head;
+      if (n === 'LED') return m.drl;
+      if (n === 'Lamp_Red') return m.tail;
+      if (n === 'Lamp_Amber') return m.marker;
+      if (n === 'Screens') return screenMats.cluster;
+      if (n === 'Glass') return m.glass;
+      if ((n === 'Rim' || n === 'Rim_Alu') && rimFor) return rimFor;
+      if (n === 'Alu' && cfg.tanks === 'chrome') return m.chrome;
+      return mt;
+    };
+    const nodes = [...src.children];
+    for (const nd of nodes) {
+      nd.traverse((o) => { if (!o.isMesh) return; o.castShadow = true; o.receiveShadow = true; o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material); });
+      if (nd.name.startsWith('Wheel_')) {
+        nd.rotation.order = 'YXZ'; offT.add(nd); spins.push(nd);
+        if (nd.name.startsWith('Wheel_1')) front.push(nd);
+      } else if (nd.name === 'Steering_Wheel') { offC.add(nd); steeringWheel = nd; }
+      else offC.add(nd);
+    }
+    // 雨刷（會動的；不開雨刷時藏起來，看到的是模型原本的雨刷）
+    for (const px of [0.55, -0.32]) { const pw = new THREE.Group(); pw.position.set(px, RS.wiperY, zz(RS.wiperZ) + 0.04); C.add(pw); const arm = part(pw, box(0.78, 0.03, 0.03), m.black, -0.39, 0, 0); arm.castShadow = false; pw.visible = false; pw.userData.realWiper = true; wipers.push(pw); }
+    // 方向燈（模型的琥珀燈不分左右，另外放會閃的方向燈）
+    const il = box(0.14, 0.09, 0.03);
+    for (const sx of [1, -1]) {
+      part(tractor, il, sx > 0 ? m.indL : m.indR, sx * RS.cornerX, RS.head[1] + 0.02, zz(RS.head[2]) - 0.08).castShadow = false;
+      part(tractor, il, sx > 0 ? m.indL : m.indR, sx * (RS.tail[0] - 0.22), RS.tail[1], zz(RS.tail[2]) - 0.02).castShadow = false;
+      part(tractor, box(0.1, 0.09, 0.03), m.reverse, sx * (RS.tail[0] - 0.38), RS.tail[1], zz(RS.tail[2]) - 0.02).castShadow = false;
+    }
+    // 大燈光：移到模型的大燈位置
+    spots.forEach((sp, i) => { const sx = i ? -1 : 1; sp.position.set(sx * RS.head[0], RS.head[1], zz(RS.head[2]) + 0.1); sp.target.position.set(sx * 1.5, 0, zz(RS.head[2]) + 30); });
+    beams.forEach((b, i) => { if (i < 2) b.position.set((i ? -1 : 1) * RS.head[0], RS.head[1], zz(RS.head[2]) + 0.12); else b.position.z = zz(RS.head[2]) + 13; });
+    // 改裝零件（照模型的車頂、車頭位置）
+    const roofY = RS.roof + (cfg.chassis === 'lift' ? 0 : 0), fz = zz(RS.front);
+    if (cfg.lightbar === 'on') { part(C, rbox(2.0, 0.16, 0.22, 0.05), m.black, 0, roofY + 0.1, fz - (US ? 2.4 : 0.55)); for (let i = 0; i < 6; i++) part(C, box(0.26, 0.11, 0.03), m.bar, -0.8 + i * 0.32, roofY + 0.1, fz - (US ? 2.4 : 0.55) + 0.12); }
+    if (cfg.stacks === 'on') for (const sx of [1, -1]) { part(C, cyl(0.11, 0.11, 3.1, 16), m.chrome, sx * 1.12, 2.35, zz(RS.cabBack) - 0.2); part(C, cyl(0.14, 0.11, 0.3, 16), m.chrome, sx * 1.12, 4.0, zz(RS.cabBack) - 0.2, 0.25); }
+    if (cfg.bumper === 'bull') { for (const x of [-0.9, -0.3, 0.3, 0.9]) part(tractor, cyl(0.05, 0.05, 1.1, 10), m.chrome, x, 1.05, fz + 0.18); for (const y of [0.65, 1.5]) part(tractor, cyl(0.05, 0.05, 2.1, 10), m.chrome, 0, y, fz + 0.18, 0, 0, Math.PI / 2); }
+    if (SIDE_COL) for (const sx of [1, -1]) for (let i = 0; i < 4; i++) part(tractor, box(0.03, 0.05, 0.12), m.side, sx * 1.27, 0.95, zz(RS.cabBack) + 0.4 + i * 0.5).castShadow = false;
+    camLocal = new THREE.Vector3(RS.eye[0], RS.eye[1], zz(RS.eye[2]));
+    mirrorLocal = [new THREE.Vector3(RS.mirror[0], RS.mirror[1], zz(RS.mirror[2])), new THREE.Vector3(-RS.mirror[0], RS.mirror[1], zz(RS.mirror[2]))];
+    frontZ = fz + 0.1; wheelbase = RS.frontAxle - RS.rearZ;
   }
 
   // ================= 拖車 =================
@@ -796,7 +873,7 @@ export function buildRig(cfg, dirt = 0) {
 
   return {
     tractor, cab, trailer, trailerBody: tBody, front, spins, trailerSpins: tSpins, wipers, steeringWheel, spots, windshield,
-    beams, camLocal, cabInner: C, frontZ: US ? 6.6 : 5.7, screenMats, mirrorLocal: US ? [new THREE.Vector3(1.5, 3.4, 3.2), new THREE.Vector3(-1.5, 3.4, 3.2)] : [new THREE.Vector3(1.45, 3.3, 5.1), new THREE.Vector3(-1.45, 3.3, 5.1)], paint, paintPlain, rimMat: cfg.rims === 'color' ? rimMat : null,
+    beams, camLocal, cabInner: C, frontZ, screenMats, mirrorLocal, wheelbase, realModel: !!RS, paint, paintPlain, rimMat: cfg.rims === 'color' ? rimMat : null,
     chameleon: cham, glowMat, glowLight, rainbowGlow: cfg.glow === 'rainbow',
     setLoaded(v) { if (load) load.visible = v; },
     redrawDirt(d) { surfaces.forEach((s) => s.redraw(d)); },

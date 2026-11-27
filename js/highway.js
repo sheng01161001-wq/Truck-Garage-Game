@@ -2,7 +2,7 @@
 // 道路用「中心線取樣點」描述：每 4 公尺一點，記錄位置、方向、路面高度、路寬、是不是隧道。
 import * as THREE from 'three';
 import { clamp, makeNoise, canvasTex, FONT } from './util.js';
-import { asphaltTex, noiseBumpTex, concreteTex, corrugatedTex, boardTex, stripeTex } from './textures.js';
+import { asphaltTex, noiseBumpTex, concreteTex, corrugatedTex, boardTex, stripeTex, pbrDetail } from './textures.js';
 import { registerStruct, pickLevel, structHeights, onStruct } from './elevated.js';
 
 const N = makeNoise(42);
@@ -433,10 +433,10 @@ export function buildHighway(root, ctx) {
 
   // ---- 路面 ----
   const bump = noiseBumpTex(5, 256, 0.8); bump.repeat.set(4, 8);
-  const asphalt = stdMat({ map: asphaltTex('highway'), bumpMap: bump, bumpScale: 1.2, roughness: 0.88 });
+  const asphalt = pbrDetail(stdMat({ map: asphaltTex('highway'), bumpMap: bump, bumpScale: 1.2, roughness: 0.88 }), 'public/assets/roads/Road012A', 4, 8, 1.1); // v45：PBR 凹凸、粗糙度、環境遮蔽
   ctx.wet(asphalt, 0.88, 0.12, new THREE.Color(0.55, 0.56, 0.6));
   const ct = concreteTex(); ct.repeat.set(1, 1);
-  const padMat = stdMat({ map: ct, roughness: 0.85 });
+  const padMat = pbrDetail(stdMat({ map: ct, roughness: 0.85 }), 'public/assets/textures/Concrete047A', 3, 3, 0.8);
   ctx.wet(padMat, 0.85, 0.25, new THREE.Color(0.7, 0.7, 0.72));
   const deck = (i0, i1, mat, uvScale) => {
     const dp = [], du = [], di = [];
@@ -455,7 +455,7 @@ export function buildHighway(root, ctx) {
 
   // ---- 市區高架橋：跨越南北向道路，含引道、橋墩、護欄與車道標線 ----
   {
-    const bridgeZ = 80, halfW = 7, deckMat = stdMat({ map: asphaltTex('highway'), bumpMap: bump, bumpScale: 0.9, roughness: 0.82 });
+    const bridgeZ = 80, halfW = 7, deckMat = pbrDetail(stdMat({ map: asphaltTex('highway'), bumpMap: bump, bumpScale: 0.9, roughness: 0.82 }), 'public/assets/roads/Road012A', 4, 8, 1.1);
     ctx.wet(deckMat, 0.82, 0.16, new THREE.Color(0.56, 0.58, 0.62));
     const concrete = stdMat({ color: 0x777d83, roughness: 0.88 });
     const rail = stdMat({ color: 0xb9c1c8, metalness: 0.78, roughness: 0.34 });
@@ -711,7 +711,7 @@ export function buildHighway(root, ctx) {
   }
 
   // ---- 隧道 ----
-  const tunMat = stdMat({ map: concreteTex(), color: 0xd8d2c4, roughness: 0.8, side: THREE.DoubleSide, envMapIntensity: 0.3 });
+  const tunMat = pbrDetail(stdMat({ map: concreteTex(), color: 0xd8d2c4, roughness: 0.8, side: THREE.DoubleSide, envMapIntensity: 0.3 }), 'public/assets/textures/Concrete047A', 4, 2, 0.9);
   tunMat.map.repeat.set(2, 1);
   const lampMat = stdMat({ color: 0x222222, emissive: 0xffc070, emissiveIntensity: 3 });
   const PROF = [[7.0, 0.02], [7.0, 0.32], [8.6, 0.32], [8.6, 5.2]];

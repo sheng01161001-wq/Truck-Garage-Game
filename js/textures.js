@@ -17,6 +17,29 @@ export function photoSet(name) {
   }
   return PHOTOS.get(name);
 }
+// v45：ambientCG 的 PBR 貼圖組（Color／NormalGL／Roughness／AmbientOcclusion），路徑＝資料夾
+const PBRS = new Map();
+export function pbrSet(dir) {
+  if (!PBRS.has(dir)) {
+    const one = (n, srgb) => loader.loadAsync(`${dir}/${n}.jpg`).then((t) => { t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t; });
+    PBRS.set(dir, Promise.all([one('Color', true), one('NormalGL', false), one('Roughness', false), one('AmbientOcclusion', false)])
+      .then(([col, nor, rou, ao]) => ({ col, img: col.image, nor, rou, ao }))
+      .catch((e) => { console.error('PBR 貼圖載入失敗：', dir, e); throw e; }));
+  }
+  return PBRS.get(dir);
+}
+// 材質加上 PBR 凹凸、粗糙度、環境遮蔽（顏色照舊）；rx, ry＝在這個材質的 UV 上重複幾次
+export function pbrDetail(mat, dir, rx, ry, normalScale = 1, withColor = false) {
+  pbrSet(dir).then(({ col, nor, rou, ao }) => {
+    const c = (t) => { const k = t.clone(); k.repeat.set(rx, ry); k.needsUpdate = true; return k; };
+    mat.normalMap = c(nor); mat.normalScale = new THREE.Vector2(normalScale, normalScale);
+    mat.roughnessMap = c(rou); mat.aoMap = c(ao); mat.aoMapIntensity = 0.8; mat.bumpMap = null;
+    if (withColor) { if (mat.map) mat.map.dispose(); mat.map = c(col); }
+    mat.needsUpdate = true;
+  }).catch(() => {});
+  return mat;
+}
+const ROAD_DIR = 'public/assets/roads/Road012A';
 // 在畫布上鋪照片（px＝一張照片在畫布上幾個像素），再乘一個顏色調亮暗
 function tilePhoto(ctx, img, w, h, px, tint = null) {
   for (let y = 0; y < h; y += px) for (let x = 0; x < w; x += px) ctx.drawImage(img, x, y, px, px);
@@ -56,10 +79,14 @@ export function photoMap(mat, name, rx, ry, normalScale = 1) {
 
 // 柏油路：顆粒、補丁、裂縫、胎痕、磨損標線（一張 = 14 公尺寬 × 28 公尺長）
 export function asphaltTex(kind) {
-  return redrawWithPhoto(asphaltTex0(kind), 'asphalt_02', (ctx, w, h, img) => paintAsphalt(kind, ctx, w, h, img));
+  // v45：畫布 512×1024（一張 14×28 公尺 ≈ 2.7 公分一個像素），鋪 ambientCG Road012A 磨損柏油照片
+  const tex = asphaltTex0(kind);
+  pbrSet(ROAD_DIR).then((p) => { const c = tex.image, ctx = c.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); ctx.scale(2, 2); paintAsphalt(kind, ctx, 256, 512, p.img); ctx.setTransform(1, 0, 0, 1, 0, 0); tex.needsUpdate = true; })
+    .catch(() => redrawWithPhoto(tex, 'asphalt_02', (ctx, w, h, img) => { ctx.setTransform(2, 0, 0, 2, 0, 0); paintAsphalt(kind, ctx, 256, 512, img); ctx.setTransform(1, 0, 0, 1, 0, 0); }));
+  return tex;
 }
 function asphaltTex0(kind) {
-  return canvasTex(256, 512, (ctx, w, h) => paintAsphalt(kind, ctx, w, h, null), { repeat: true });
+  return canvasTex(512, 1024, (ctx, w, h) => { ctx.scale(2, 2); paintAsphalt(kind, ctx, 256, 512, null); }, { repeat: true });
 }
 function paintAsphalt(kind, ctx, w, h, photo) {
   {
@@ -86,7 +113,7 @@ function paintAsphalt(kind, ctx, w, h, photo) {
     addGrain(ctx, w, h, 14, 11);
     // 有照片就鋪實拍柏油（照片 3 公尺見方 ≈ 51 像素），再畫回車道的輪胎痕
     if (photo) {
-      tilePhoto(ctx, photo, w, h, w / 5, '#ababab');   // 剛好整除，重複時才不會有接縫
+      tilePhoto(ctx, photo, w, h, w / 4, '#b4b4b4');   // 剛好整除，重複時才不會有接縫（一張照片 3.5 公尺）
       if (kind !== 'plain') { ctx.fillStyle = 'rgba(16,16,18,0.18)'; for (const x of [46, 82, 174, 210]) ctx.fillRect(x - 7, 0, 14, h); }
     }
     ctx.globalAlpha = 0.88;
