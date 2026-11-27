@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v41';
+const VERSION = 'v42';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -169,7 +169,7 @@ function loadSave() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { s = null; }
   const out = { coins: 500, owned: [], deliveries: 0, truck: { ...DEFAULT_TRUCK }, fleet: [], company: { name: '小棒槌物流', trucks: 1, engineLevel: 0, fuelLevel: 0, revenue: 0, expenses: 0, contracts: 0, wages: 0, maintenance: 0, fuelCost: 0, fleetLog: [], queuedCargo: null, fleetUnits: [] }, fuel: 1, damage: 0, dirt: 0.15,
-    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'mid' : 'high', traffic: 'normal', volume: 1, post: true, mirrors: true, fps: false, glb: true, gearbox: 'auto', steer: 'normal', shake: true, autoLights: true }, odo: 0, loan: 0, loanT: 0, ledger: [], xp: 0, ver: SAVE_VER, ach: [], flags: {} };
+    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'mid' : 'high', traffic: 'normal', volume: 1, post: true, mirrors: true, fps: false, glb: true, gearbox: 'auto', steer: 'normal', shake: true, autoLights: true }, odo: 0, loan: 0, loanT: 0, ledger: [], xp: 0, garages: [], ver: SAVE_VER, ach: [], flags: {} };
   if (s && typeof s === 'object') {
     if (Number.isFinite(s.coins) && s.coins >= 0) out.coins = Math.floor(s.coins);
     if (Array.isArray(s.owned)) out.owned = s.owned.filter((x) => typeof x === 'string');
@@ -195,6 +195,7 @@ function loadSave() {
     if (Number.isFinite(s.odo)) out.odo = Math.max(0, s.odo);
     if (Number.isFinite(s.loan)) out.loan = clamp(Math.round(s.loan), 0, 50000);
     if (Number.isFinite(s.xp)) out.xp = Math.max(0, Math.round(s.xp));
+    if (Array.isArray(s.garages)) out.garages = s.garages.filter((i) => Number.isInteger(i) && i >= 0 && i < DEPOTS.length).slice(0, DEPOTS.length);
     else if (Number.isFinite(s.deliveries)) out.xp = Math.round(s.deliveries * 120); // 舊存檔：照送貨次數補經驗值
     if (Number.isFinite(s.loanT)) out.loanT = Math.max(0, s.loanT);
     if (Array.isArray(s.ledger)) out.ledger = s.ledger.filter((e) => e && Number.isFinite(e.v) && typeof e.cat === 'string').slice(0, 200).map((e) => ({ t: Number(e.t) || 0, cat: e.cat.slice(0, 12), note: String(e.note || '').slice(0, 40), v: Math.round(e.v) }));
@@ -353,13 +354,16 @@ const CARGOS = [
   { n: '📦 貨櫃', t: 18, cat: '貨櫃', tr: 'flat' }, { n: '🚜 挖土機', t: 28, heavy: true, cat: '重型機械', tr: 'flat' }, { n: '⛽ 汽油', t: 20, danger: true, cat: '危險品', tr: 'box' },
   { n: '🧪 化學原料', t: 16, danger: true, cat: '危險品', tr: 'box' }, { n: '🏗️ H 型鋼樑', t: 26, cat: '鋼材', tr: 'flat' }, { n: '🥩 冷凍肉品', t: 17, fresh: true, cat: '冷凍貨物', tr: 'box' },
   { n: '🌳 原木', t: 24, cat: '木材', tr: 'flat' }, { n: '🚧 水泥管', t: 22, cat: '建築材料', tr: 'flat' }, { n: '🏭 發電機組', t: 26, heavy: true, cat: '重型機械', tr: 'flat' }, { n: '📦 雙櫃貨櫃', t: 24, cat: '貨櫃', tr: 'flat' },
+  // v42：農產品、工業設備
+  { n: '🌾 稻米', t: 18, cat: '農產品', tr: 'box' }, { n: '🍍 鳳梨', t: 14, fragile: true, cat: '農產品', tr: 'box' }, { n: '🥬 高麗菜', t: 12, fresh: true, cat: '農產品', tr: 'box' },
+  { n: '⚙️ 工具機', t: 22, fragile: true, cat: '工業設備', tr: 'flat' }, { n: '🔋 變壓器', t: 24, fragile: true, cat: '工業設備', tr: 'flat' },
 ];
-const CARGO_CATS = { '一般貨物': '📦', '貨櫃': '🚢', '鋼材': '🔩', '木材': '🌲', '建築材料': '🧱', '重型機械': '🚜', '冷凍貨物': '❄️', '危險品': '⚠️' };
+const CARGO_CATS = { '一般貨物': '📦', '農產品': '🌾', '貨櫃': '🚢', '鋼材': '🔩', '木材': '🌲', '建築材料': '🧱', '工業設備': '⚙️', '重型機械': '🚜', '冷凍貨物': '❄️', '危險品': '⚠️' };
 const TRAILER_N = { box: '廂型拖車', flat: '平板拖車', dump: '砂石斗' };
 const cargoRule = (j) => j.danger ? '不能進隧道、限速 80' : j.heavy ? '超重、限速 60' : j.fresh ? '要準時，遲到會壞' : j.fragile ? '易碎，輕輕開' : '';
 // v38：職業等級（經驗值每級需要越來越多）、高等級才能接的貨
 const levelOf = (xp) => { let lv = 1, need = 500, left = xp; while (left >= need && lv < 50) { left -= need; lv++; need = Math.round(need * 1.18); } return { lv, cur: left, need }; };
-const CAT_LEVEL = { '危險品': 3, '重型機械': 4, '貨櫃': 2 };
+const CAT_LEVEL = { '危險品': 3, '重型機械': 4, '貨櫃': 2, '工業設備': 2 };
 // 目前拖的拖車種類：有任務就用任務的拖車，不然用自己改裝的
 const curTrailer = () => (S.mission && S.mission.tr) || save.truck.trailerType;
 const CONTRACTS = [
@@ -442,7 +446,7 @@ function newMission(fromIdx = null, cargoIdx = null, job = null) {
   if (cargoIdx == null && !job && Number.isInteger(save.company.queuedCargo)) cargoIdx = save.company.queuedCargo;
   save.company.queuedCargo = null;
   const j = job || makeJob(fromIdx, cargoIdx);
-  S.mission = { ...j, stage: 'pickup', wait: 0, elapsed: 0, cargoDmg: 0, fuel0: save.fuel, redLights: 0, speeding: 0 };
+  S.mission = { ...j, stage: 'pickup', wait: 0, elapsed: 0, cargoDmg: 0, fuel0: save.fuel, dmg0: save.damage, redLights: 0, speeding: 0 };
   S.loadT = 0; S.route = null;
   // v36：任務的拖車停在裝貨點，要自己開過去倒車連接（如果剛卸下的拖車就在這裡，就用同一台）
   const pose = depotTrailerPose(j.from);
@@ -497,6 +501,7 @@ function renderJobBoard() {
       <div class="row"><span>花了 ${mmss(receipt.elapsed)}（時限 ${mmss(receipt.deadline)}）</span><b>${receipt.elapsed <= receipt.deadline ? '準時' : '遲到'}</b></div>
       <div class="row"><span>這趟用掉的油（加油時才付）</span><b>約 ${receipt.fuelCost}</b></div>
       ${receipt.notes.length ? `<div class="row"><span>${receipt.notes.join('、')}</span><b></b></div>` : ''}
+      ${receipt.score ? `<div class="score">${receipt.score.map(([k, ok]) => `<span class="${ok ? 'ok' : 'bad'}">${ok ? '✔' : '✖'} ${k}</span>`).join('')}</div>` : ''}
       <div class="row total"><span>實拿</span><span>💰 ${receipt.payout}</span></div></div>`;
   }
   const depOpt = (sel) => `<option value="-1">全部</option>` + DEPOTS.map((d, i) => `<option value="${i}" ${sel === i ? 'selected' : ''}>${d.emoji} ${d.name}</option>`).join('');
@@ -578,6 +583,11 @@ function checkMission(dt) {
       if (m.cargoDmg > 0.4) stars -= 2; else if (m.cargoDmg > 0.1) stars--;
       if (m.redLights > 0) { stars--; notes.push(`闖紅燈 ${m.redLights} 次`); }
       if (m.speeding > 10) { stars--; notes.push(`超速 ${Math.round(m.speeding)} 秒`); }
+      // v42：車輛損壞、駕駛安全（碰撞次數）也算分；油耗只做紀錄
+      const vehDmg = Math.max(0, save.damage - (m.dmg0 ?? save.damage)), fuelUsed = Math.max(0, m.fuel0 - save.fuel);
+      if (vehDmg > 0.1) { stars--; notes.push(`車損 +${Math.round(vehDmg * 100)}%`); }
+      if (S.bumpsThisJob > 2) { stars--; notes.push(`碰撞 ${S.bumpsThisJob} 次`); }
+      const score = [['運送時間', early], ['車輛損壞', vehDmg <= 0.1], ['貨物損壞', m.cargoDmg <= 0.1], ['交通違規', !m.redLights && m.speeding <= 10], ['燃油消耗', fuelUsed < 0.25], ['駕駛安全', S.bumpsThisJob <= 2]];
       stars = clamp(stars, 1, 5);
       money(payout, '送貨', m.cargo); save.deliveries++;
       const lv0 = levelOf(save.xp || 0).lv, gain = Math.round(60 + m.reward / 8 + stars * 25 + (m.danger || m.heavy ? 60 : 0));
@@ -592,7 +602,7 @@ function checkMission(dt) {
       save.company.expenses += fleetCost; save.company.contracts++;
       persist(); updateCoins();
       Snd.coin(); setTimeout(() => Snd.buy(), 350); popup(`💰 +${payout}`);
-      const receipt = { cargo: m.cargo, reward: m.reward, timeBonus, latePenalty, dmgPenalty, dmgPct: Math.round(m.cargoDmg * 100), bonus, fleet: fleetGross - fleetCost, payout, stars, elapsed: m.elapsed, deadline: m.deadline, fuelCost: Math.max(0, Math.round((m.fuel0 - save.fuel) * 60)), notes };
+      const receipt = { cargo: m.cargo, reward: m.reward, timeBonus, latePenalty, dmgPenalty, dmgPct: Math.round(m.cargoDmg * 100), bonus, fleet: fleetGross - fleetCost, payout, stars, elapsed: m.elapsed, deadline: m.deadline, fuelCost: Math.max(0, Math.round((m.fuel0 - save.fuel) * 60)), notes, score };
       const here = m.to;
       // v36：卸完貨把拖車留在卸貨區（拖車大栓在第五輪的位置），換成空車頭
       S.coupled = false; S.parked = { x: S.x + Math.sin(S.heading) * 0.15, z: S.z + Math.cos(S.heading) * 0.15, h: S.trailerHeading, y: S.y }; S.trailerHeading = S.heading; S.yA = S.y;
@@ -743,9 +753,14 @@ function setIndicator(k) { S.ind = S.ind === k ? null : k; S.blinkT = 0; S.indAr
 const CAM_NAMES = ['車尾追蹤', '高空鏡頭', '駕駛座', '路邊轉播', '車頭視角', '側面視角', '自由鏡頭（拖曳旋轉）'];
 const CAM_ORDER = [0, 2, 4, 5, 6, 1, 3];
 function switchCam() { S.followFleetId = null; S.cam = CAM_ORDER[(CAM_ORDER.indexOf(S.cam) + 1) % CAM_ORDER.length]; S.camYaw = 0; S.cine = null; toast('📷 ' + CAM_NAMES[S.cam], 1000); }
+// v42：自己的車庫據點：回廠時回到最近的車庫；停在車庫裝卸區半價加油修車
+const GARAGE_PRICE = 12000;
+function garagePose(i) { const P = depotTrailerPose(i); return { x: P.x + Math.sin(P.h) * 9, z: P.z + Math.cos(P.h) * 9, h: P.h }; }
 function resetTruck() {
-  Object.assign(S, { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading, trailerHeading: SPAWN.heading, v: 0, steer: 0, gear: 1, y: 0, yA: 0, grade: 0, tunNear: false, tollSide: null, tollPaid: false, roll: 0, rollV: 0, rollover: false, rolloverWarned: false, tipT: 0, tipSide: 1 });
-  placeRig(); toast('🔄 回到改裝廠門口', 1200);
+  let sp = SPAWN, name = '改裝廠';
+  if ((save.garages || []).length) { let best = null, bd = 1e9; for (const i of save.garages) { const p = garagePose(i), d = Math.hypot(p.x - S.x, p.z - S.z); if (d < bd) { bd = d; best = { ...p, i }; } } if (best) { sp = { x: best.x, z: best.z, heading: best.h }; name = DEPOTS[best.i].name + ' 車庫'; } }
+  Object.assign(S, { x: sp.x, z: sp.z, heading: sp.heading, trailerHeading: sp.heading, v: 0, steer: 0, gear: 1, y: 0, yA: 0, grade: 0, tunNear: false, tollSide: null, tollPaid: false, roll: 0, rollV: 0, rollover: false, rolloverWarned: false, tipT: 0, tipSide: 1 });
+  S.y = groundAt(S.x, S.z); placeRig(); toast(`🔄 回到${name}`, 1200);
 }
 function toggleSound() { Snd.init(); Snd.setMuted(!Snd.muted); $('#bSound').firstChild.textContent = Snd.muted ? '🔇' : '🔊'; }
 function refreshButtons() {
@@ -1437,6 +1452,14 @@ function drive(dt) {
   if (Math.abs(save.dirt - S.dirtDrawn) > 0.06) { S.dirtDrawn = save.dirt; rig.redrawDirt(save.dirt); }
   if (noFuel && !S.noFuelWarned) { S.noFuelWarned = true; toast('⛽ 沒油了！開到加油站，或按 🔄 回改裝廠加油', 4000); }
   if (!noFuel) S.noFuelWarned = false;
+  // v42：停在自己的車庫：半價加油、修車
+  if (stopped && (save.garages || []).length) for (const gi of save.garages) {
+    const D = DEPOTS[gi]; if (Math.hypot(S.x - D.x, S.z - D.z) > 14) continue;
+    if (save.fuel < 0.999) { const add = Math.min(1 - save.fuel, dt * 0.1); save.fuel += add; S.fuelCoinAcc += add * 30; if (S.fuelCoinAcc >= 1 && save.coins > 0) { money(-1, '加油', '自家車庫'); S.fuelCoinAcc -= 1; } }
+    if (save.damage > 0.001) { save.damage = Math.max(0, save.damage - dt * 0.05); S.repairAcc = (S.repairAcc || 0) + dt * 2; if (S.repairAcc >= 1 && save.coins > 0) { money(-1, '維修', '自家車庫'); S.repairAcc -= 1; } }
+    if ((save.fuel < 0.999 || save.damage > 0.001) && !S.hint) S.hint = `🏠 自家車庫：半價加油修車中… 油 ${Math.round(save.fuel * 100)}%　車損 ${Math.round(save.damage * 100)}%`;
+    break;
+  }
   // 加油站
   if (Math.hypot(S.x + Math.sin(S.heading) * 2 - GAS.x, S.z + Math.cos(S.heading) * 2 - GAS.z) < 10 && stopped && save.fuel < 0.999) {
     const add = Math.min(1 - save.fuel, dt * 0.08); save.fuel += add; S.fuelCoinAcc += add * 60;
@@ -1966,6 +1989,8 @@ function renderMenu() {
       <div class="cstats"><div><small>送貨趟數</small><b>${save.deliveries}</b></div><div><small>平均評價</small><b>${j.done ? '⭐ ' + (j.stars / j.done).toFixed(1) : '—'}</b></div><div><small>總里程</small><b>${((save.odo || 0) / 1000).toFixed(1)} 公里</b></div>
       <div><small>現金</small><b>💰 ${save.coins.toLocaleString()}</b></div><div><small>貸款</small><b>${(save.loan || 0).toLocaleString()}</b></div><div><small>公司卡車</small><b>${save.company.trucks} 台</b></div>
       <div><small>最近送貨收入</small><b>${earned.toLocaleString()}</b></div><div><small>成就</small><b>${(save.ach || []).length} / ${ACH.length}</b></div><div><small>收藏卡車</small><b>${save.fleet.length} 台</b></div></div>
+      <div class="studio-note" style="margin-top:6px"><b>🏠 車庫據點</b>（每間 ${GARAGE_PRICE.toLocaleString()}）：按 🔄 回廠會回到最近的車庫；停在車庫的裝卸區可以半價加油、修車。</div>
+      <div class="opts" style="margin-bottom:8px">${DEPOTS.map((d, i) => (save.garages || []).includes(i) ? `<button class="opt sel" disabled>✅ ${d.emoji} ${d.name}</button>` : `<button class="opt" data-act="garage-${i}">${d.emoji} ${d.name}</button>`).join('')}</div>
       <div class="unlock"><b>等級解鎖：</b>${Object.entries(CAT_LEVEL).map(([c, l]) => `${L.lv >= l ? '✅' : '🔒'} 等級 ${l}「${c}」`).join('　')}<br>送貨經驗值：基本 60 ＋ 運費 ÷ 8 ＋ 每顆星 25（危險品、重型機械再加 60）</div>`;
   } else if (menuTab === 'drive') {
     h += `<div class="set-row"><span>變速箱（R 切換）</span><div class="opts">${opt('gearbox', 'auto', '自排')}${opt('gearbox', 'manual', '手排')}</div></div>
@@ -2042,6 +2067,11 @@ $('#menuBody').addEventListener('click', (e) => {
     const want = act === 'repay1k' ? 1000 : (save.loan || 0), pay = Math.min(want, save.loan || 0, save.coins);
     if (pay <= 0) { toast(save.loan ? '金幣不夠' : '沒有貸款', 1400); return; }
     save.loan -= pay; money(-pay, '貸款', '還款'); persist(); Snd.buy(); toast(save.loan ? `還了 ${pay.toLocaleString()}，還欠 ${save.loan.toLocaleString()}` : '🎉 貸款全部還清了！', 1800); renderMenu();
+  } else if (act && act.startsWith('garage-')) {
+    const i = Number(act.slice(7)); if (!(i >= 0 && i < DEPOTS.length) || (save.garages || []).includes(i)) return;
+    if (save.coins < GARAGE_PRICE) { toast(`金幣不夠，還差 ${(GARAGE_PRICE - save.coins).toLocaleString()}`, 1600); return; }
+    if (!confirm(`用 ${GARAGE_PRICE.toLocaleString()} 金幣買下「${DEPOTS[i].name}」的車庫？`)) return;
+    money(-GARAGE_PRICE, '車庫', DEPOTS[i].name); save.garages = [...(save.garages || []), i]; persist(); Snd.buy(); toast(`🏠 買下「${DEPOTS[i].name}」車庫！`, 1800); renderMenu();
   } else if (act === 'money') { menuTab = 'money'; renderMenu();
   } else if (act === 'resume') { closeMenu();
   } else if (act === 'jobs') { closeMenu(); openJobs();
