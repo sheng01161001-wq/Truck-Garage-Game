@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v38';
+const VERSION = 'v39';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -304,6 +304,7 @@ const S = {
   mission: null, hint: '', time: 0, temp: 0.5, hornT: 0, bumpsThisJob: 0, loadT: 0,
   route: null, routeT: 0, dirtDrawn: save.dirt, fuelCoinAcc: 0, wasStopped: true, lastSurface: 'road',
   y: 0, yA: 0, grade: 0, tunNear: false, tollSide: null,
+  freeYaw: 2.4, freePitch: 0.35, camH: 1, dome: false,
   handbrake: false, air: 1, paused: false, coupled: false, parked: null, pendingPark: null, canCouple: false, camDist: 1, camPitch: 0, // v33：手煞車、氣壓（1＝10 bar）、暫停；v34 鏡頭距離
 };
 let rig = null;
@@ -314,6 +315,8 @@ function rebuildRig(cfg) {
   rig = buildRig(inGarage() ? cfg : { ...cfg, trailerType: curTrailer() }, save.dirt); // v36：開車時拖的是任務的拖車
   S.rigCfg = JSON.stringify(cfg);
   scene.add(rig.tractor, rig.trailer);
+  // v39：駕駛室車內燈（O）
+  const dome = new THREE.PointLight(0xffe2b0, 0, 3.4, 1.4); dome.position.copy(rig.camLocal).add(new THREE.Vector3(-0.55, 0.6, -0.2)); rig.cabInner.add(dome); rig.dome = dome;
   rig.setLoaded(!!(S.mission && S.mission.stage === 'deliver'));
   S.dirtDrawn = save.dirt;
   placeRig();
@@ -628,6 +631,9 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'ControlLeft' || k === 'ControlRight' || k === 'PageDown') manualShift(-1);
   else if (k === 'KeyN') toggleSound();
   else if (k === 'KeyF') coupleTrailer();
+  else if (k === 'BracketLeft') S.camH = clamp(S.camH - 0.15, 0.4, 2.2);
+  else if (k === 'BracketRight') S.camH = clamp(S.camH + 0.15, 0.4, 2.2);
+  else if (k === 'KeyO') { S.dome = !S.dome; Snd.click(); toast(S.dome ? '💡 車內燈：開' : '車內燈：關', 900); }
   else if (k === 'Equal' || k === 'NumpadAdd') S.camDist = clamp(S.camDist / 1.15, 0.55, 2.2);
   else if (k === 'Minus' || k === 'NumpadSubtract') S.camDist = clamp(S.camDist * 1.15, 0.55, 2.2);
   else if (k === 'KeyG') openGarage();
@@ -657,7 +663,7 @@ const touchPts = new Map(); let pinch0 = 0, pinchDist0 = 1;
 canvas.addEventListener('pointerdown', (e) => {
   touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touchPts.size === 2) { const [a, b] = [...touchPts.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); pinchDist0 = inGarage() ? S.gRadius : S.camDist; S.gDrag = null; return; }
-  S.gDrag = { x: e.clientX, y: e.clientY, a: inGarage() ? S.gAng : S.camYaw, p: S.camPitch };
+  S.gDrag = { x: e.clientX, y: e.clientY, a: inGarage() ? S.gAng : S.camYaw, p: S.camPitch, fy: S.freeYaw, fp: S.freePitch };
 });
 window.addEventListener('pointermove', (e) => {
   if (touchPts.has(e.pointerId)) touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -670,6 +676,7 @@ window.addEventListener('pointermove', (e) => {
   const v = S.gDrag.a - (e.clientX - S.gDrag.x) * 0.008;
   if (inGarage()) S.gAng = v;
   else {
+    if (S.cam === 6) { S.freeYaw = S.gDrag.fy - (e.clientX - S.gDrag.x) * 0.008; S.freePitch = clamp(S.gDrag.fp + (e.clientY - S.gDrag.y) * 0.005, 0.05, 1.3); return; }
     S.camYaw = v; S.camYawT = 2.5;
     if (S.cam === 2) S.camPitch = clamp(S.gDrag.p - (e.clientY - S.gDrag.y) * 0.004, -0.6, 0.45); // 駕駛座：上下看
   }
@@ -706,8 +713,10 @@ function manualShift(dir) {
   S.gear = ng; S.shiftT = 0.35; Snd.shift();
 }
 function setIndicator(k) { S.ind = S.ind === k ? null : k; S.blinkT = 0; S.indArmed = false; refreshButtons(); }
-const CAM_NAMES = ['追車鏡頭', '高空鏡頭', '駕駛座', '路邊轉播'];
-function switchCam() { S.followFleetId = null; S.cam = (S.cam + 1) % 4; S.camYaw = 0; S.cine = null; toast('📷 ' + CAM_NAMES[S.cam], 1000); }
+// v39：鏡頭 0 車尾追蹤、2 駕駛座、4 車頭、5 側面、6 自由鏡頭（拖曳轉、滾輪遠近）、1 高空、3 路邊轉播
+const CAM_NAMES = ['車尾追蹤', '高空鏡頭', '駕駛座', '路邊轉播', '車頭視角', '側面視角', '自由鏡頭（拖曳旋轉）'];
+const CAM_ORDER = [0, 2, 4, 5, 6, 1, 3];
+function switchCam() { S.followFleetId = null; S.cam = CAM_ORDER[(CAM_ORDER.indexOf(S.cam) + 1) % CAM_ORDER.length]; S.camYaw = 0; S.cine = null; toast('📷 ' + CAM_NAMES[S.cam], 1000); }
 function resetTruck() {
   Object.assign(S, { x: SPAWN.x, z: SPAWN.z, heading: SPAWN.heading, trailerHeading: SPAWN.heading, v: 0, steer: 0, gear: 1, y: 0, yA: 0, grade: 0, tunNear: false, tollSide: null, tollPaid: false, roll: 0, rollV: 0, rollover: false, rolloverWarned: false, tipT: 0, tipSide: 1 });
   placeRig(); toast('🔄 回到改裝廠門口', 1200);
@@ -1475,6 +1484,22 @@ function restService(dt, stopped) {
 // ================= 鏡頭 =================
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 let camInit = false;
+// v39：鏡頭防穿牆：從看的點往鏡頭走，碰到建築就停在建築前面；也不鑽到地面下
+const _cv = new THREE.Vector3(); let camBoxes = null;
+function camAntiClip(look, want) {
+  if (!camBoxes) camBoxes = boxes.filter((b) => b.top === undefined && (b.maxx - b.minx) * (b.maxz - b.minz) > 30); // 只看建築（路燈、樹這種小東西不擋鏡頭）
+  const N = 14; let lastOk = 0;
+  for (let i = 1; i <= N; i++) {
+    const t = i / N; _cv.lerpVectors(look, want, t);
+    let hit = false;
+    if (_cv.y < 30) for (const b of camBoxes) {
+      if (_cv.x > b.minx - 0.6 && _cv.x < b.maxx + 0.6 && _cv.z > b.minz - 0.6 && _cv.z < b.maxz + 0.6) { hit = true; break; }
+    }
+    if (hit) break; lastOk = t;
+  }
+  if (lastOk < 1) want.lerpVectors(look, want, Math.max(0.12, lastOk));
+  if (!S.tunNear) want.y = Math.max(want.y, surfaceY(want.x, want.z) + 1.2);
+}
 function updateCamera(dt) {
   if(S.followFleetId){
     const target=traffic.fleetObject(S.followFleetId);
@@ -1503,8 +1528,16 @@ function updateCamera(dt) {
     const yaw = S.camYawT > 0 ? S.camYaw : 0;
     if (S.camYawT <= 0 && !S.gDrag) S.camPitch *= Math.max(0, 1 - dt * 2); // 放開滑鼠後慢慢回正
     look.set(Math.sin(yaw) * 10, -0.45 + Math.tan(S.camPitch) * 10, Math.cos(yaw) * 10).applyQuaternion(q).add(want);
+    if (S.shake > 0 && save.settings.shake !== false) want.add(tmpV.set((Math.random() - 0.5) * S.shake * 0.25, (Math.random() - 0.5) * S.shake * 0.25, 0));
     camPos.copy(want); camLook.copy(look);
     camera.position.copy(want); camera.lookAt(look); return;
+  } else if ((S.cam === 4 || S.cam === 5 || S.cam === 6) && !S.tunNear) {
+    // v39：車頭、側面、自由鏡頭
+    const rx = -fz, rz = fx, mid = 0.5 * (S.coupled ? 1 : 0); // 右邊方向；有拖車時看整台車的中間
+    const cx = S.x - Math.sin(S.trailerHeading) * 5 * mid, cz = S.z - Math.cos(S.trailerHeading) * 5 * mid;
+    if (S.cam === 4) { want.set(S.x + fx * 13 * S.camDist + rx * 2.5, S.y + 3.2 * S.camH, S.z + fz * 13 * S.camDist + rz * 2.5); look.set(S.x + fx * 2, S.y + 2.2, S.z + fz * 2); }
+    else if (S.cam === 5) { want.set(cx + rx * 14 * S.camDist, S.y + 3.0 * S.camH, cz + rz * 14 * S.camDist); look.set(cx, S.y + 2.0, cz); }
+    else { const R = 20 * S.camDist; want.set(cx + Math.sin(S.freeYaw) * Math.cos(S.freePitch) * R, S.y + 2 + Math.sin(S.freePitch) * R, cz + Math.cos(S.freeYaw) * Math.cos(S.freePitch) * R); look.set(cx, S.y + 2.2, cz); }
   } else if (S.cam === 3 && !S.tunNear) {
     const d = S.cine ? Math.hypot(S.cine.x - S.x, S.cine.z - S.z) : 999;
     if (!S.cine || d > 70) { const side = Math.random() < 0.5 ? 1 : -1, cx = S.x + fx * 45 + fz * 9 * side, cz = S.z + fz * 45 - fx * 9 * side; S.cine = new THREE.Vector3(cx, surfaceY(cx, cz) + 2.2, cz); }
@@ -1514,13 +1547,14 @@ function updateCamera(dt) {
     // 隧道附近鏡頭放低，才不會穿到山裡
     // 隧道附近：鏡頭比拖車頂高一點、比隧道頂低，往前看遠一點才不會被拖車擋住
     const cd = S.tunNear ? Math.min(1, S.camDist) : S.camDist; // v34：滾輪調遠近（隧道裡最多原本距離）
-    const back = (S.tunNear ? 15 : S.cam === 1 ? 42 : 19) * cd, up = (S.tunNear ? 6.6 : S.cam === 1 ? 30 : 8.5) * Math.pow(cd, 0.8);
+    const back = (S.tunNear ? 15 : S.cam === 1 ? 42 : 19) * cd, up = (S.tunNear ? 6.6 : S.cam === 1 ? 30 : 8.5) * Math.pow(cd, 0.8) * (S.tunNear ? 1 : S.camH); // v39：[ ] 調鏡頭高度
     if (S.camYawT > 0) { S.camYawT -= dt; if (S.camYawT <= 0) S.camYaw = 0; }
     const th = S.trailerHeading * 0.55 + S.heading * 0.45 + (S.camYawT > 0 ? S.camYaw : 0);
     want.set(S.x - Math.sin(th) * back + fx * 2, S.y + up, S.z - Math.cos(th) * back + fz * 2);
     if (!S.tunNear) want.y = Math.max(want.y, surfaceY(want.x, want.z) + 3); // 不要鑽進山坡
     if (S.tunNear) look.set(S.x + fx * 16, S.y + 2.2, S.z + fz * 16); else look.set(S.x + fx * 7, S.y + 2.8, S.z + fz * 7);
   }
+  if (!inGarage() && S.mode !== 'title') camAntiClip(look, want); // v39：鏡頭不穿過建築、地面
   if (!camInit) { camPos.copy(want); camLook.copy(look); camInit = true; }
   const k = inGarage() ? Math.min(1, dt * 6) : Math.min(1, dt * 3.2);
   camPos.lerp(want, k); camLook.lerp(look, k);
@@ -1730,6 +1764,8 @@ function frame(dt) {
   setTruckLights({ head: S.lights, brake: braking, indL: S.blink && (S.ind === 'L' || S.ind === 'H'), indR: S.blink && (S.ind === 'R' || S.ind === 'H'), reverse: S.gear < 0 });
   const lightsOn = S.lights && !inGarage();
   rig.spots.forEach((s) => (s.intensity = lightsOn ? 900 : 0));
+  if (rig.dome) rig.dome.intensity = S.dome && !inGarage() ? 2.4 : 0;
+  if (S.mode === 'drive' && Math.abs(S.v) > 20) S.shake = Math.max(S.shake, (Math.abs(S.v) - 20) * 0.004); // v39：高速時鏡頭輕微震動
   // v32：大燈光錐＋照在路面上的光斑（越暗越明顯；下雨霧天光錐更清楚）
   const beamK = lightsOn && S.mode === 'drive' ? clamp(env.state.night * 1.1 + (env.state.weather === 'fog' || rainyW(env.state.weather) ? 0.25 : 0), 0, 1) : 0;
   for (const b of rig.beams) { b.visible = beamK > 0.02; b.material.opacity = b.userData.base * beamK; }
@@ -1911,7 +1947,8 @@ function renderMenu() {
     h += `<div class="howto"><div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 油門／煞車（停住後按住＝倒車）／方向盤</div>
       <div><kbd>空白鍵</kbd> 手煞車　<kbd>R</kbd> 自排／手排　<kbd>Shift</kbd><kbd>Ctrl</kbd> 手排升檔／降檔</div>
       <div><kbd>Q</kbd><kbd>E</kbd> 方向燈　<kbd>X</kbd> 警示燈　<kbd>L</kbd> 大燈　<kbd>K</kbd> 雨刷　<kbd>H</kbd> 喇叭　<kbd>J</kbd> 排氣煞車</div>
-      <div><kbd>C</kbd> 換鏡頭　<kbd>滑鼠拖曳</kbd> 轉頭看　<kbd>滾輪</kbd> 鏡頭遠近　<kbd>M</kbd> 世界地圖　<kbd>Esc</kbd> 遊戲選單</div>
+      <div><kbd>C</kbd> 換鏡頭（車尾／駕駛座／車頭／側面／自由／高空／路邊）　<kbd>滑鼠拖曳</kbd> 轉頭看　<kbd>滾輪</kbd> 遠近　<kbd>[</kbd><kbd>]</kbd> 高低　<kbd>O</kbd> 車內燈</div>
+      <div><kbd>M</kbd> 世界地圖　<kbd>Esc</kbd> 遊戲選單</div>
       <div><kbd>T</kbd> 換時間　<kbd>Y</kbd> 換天氣　<kbd>G</kbd> 改裝廠　<kbd>N</kbd> 聲音　<kbd>Backspace</kbd> 回廠</div>
       <div class="tip">平板手機用畫面上的按鈕。按「📋 接單」到貨運市場挑貨物 → 開到裝貨區倒車接拖車（F）→ 跟著橘色導航線送到卸貨區停好就會自動卸貨。</div></div>
       <button class="big-act gold" data-act="tutorial">🎓 重新開始新手教學</button>`;
