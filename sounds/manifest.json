@@ -1,5 +1,9 @@
 {
-  "engine": [],
-  "music": [],
-  "musicVolume": 0.35
+  "engine": [
+    { "file": "engine_idle.wav", "rpm": 620 },
+    { "file": "engine_mid.wav", "rpm": 1100 },
+    { "file": "engine_high.wav", "rpm": 1600 }
+  ],
+  "music": ["music_rock.mp3", "music_synth.mp3", "music_rock2.mp3"],
+  "musicVolume": 0.3
 }

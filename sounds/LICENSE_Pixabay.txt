@@ -1,0 +1,12 @@
+sounds 資料夾裡的聲音來源（2026-11-27 下載，Pixabay 授權：免費商用、不用標示作者）
+https://pixabay.com/service/license-summary/
+
+引擎（剪成無縫循環、統一音量）
+- engine_idle.wav ← Truck Engine Idle Loops（freesound_community）https://pixabay.com/sound-effects/technology-truck-engine-idle-loops-33687/
+- engine_mid.wav  ← Hyundai HD1000 Tractor Truck Engine Sound（freesound_community）https://pixabay.com/sound-effects/city-hyundai-hd1000-tractor-truck-engine-sound-42636/
+- engine_high.wav ← Big Truck engine（freesound_community）https://pixabay.com/sound-effects/city-big-truck-engine-64992/
+
+配樂（音量統一到 -16 LUFS）
+- music_rock.mp3  ← Driving（nastelbom）https://pixabay.com/music/rock-driving-439500/
+- music_synth.mp3 ← Synthwave Driving（jonasblakewood）https://pixabay.com/music/synthwave-synthwave-driving-618634/
+- music_rock2.mp3 ← Driving Rock Music（hitslab）https://pixabay.com/music/rock-driving-rock-music-543109/

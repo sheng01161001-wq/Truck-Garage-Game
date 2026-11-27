@@ -145,7 +145,7 @@ export const Snd = {
       const L = this.samples; let i = 0; while (i < L.length - 1 && L[i + 1].rpm < rpm) i++;
       const a = L[i], b = L[Math.min(L.length - 1, i + 1)], w = b === a ? 0 : Math.min(1, Math.max(0, (rpm - a.rpm) / (b.rpm - a.rpm)));
       for (const s of L) { const g = s === a ? 1 - w : s === b ? w : 0; s.g.gain.setTargetAtTime(g, t, 0.08); s.src.playbackRate.setTargetAtTime(Math.min(2.5, Math.max(0.4, rpm / s.rpm)), t, 0.05); }
-      this.sampleBus.gain.setTargetAtTime(running ? (0.5 + load * 0.5) : 0, t, 0.12);
+      this.sampleBus.gain.setTargetAtTime(running ? (0.4 + load * 0.45) * (inside ? 0.9 : 1) : 0, t, 0.12);
       this.sampleLP.frequency.setTargetAtTime(inside ? 1400 + load * 1200 : 18000, t, 0.1);
     }
     // 排氣煞車：放油門、轉速夠高才有
