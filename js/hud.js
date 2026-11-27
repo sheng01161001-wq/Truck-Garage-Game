@@ -183,7 +183,7 @@ export function drawCluster(cv, d) {
   ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 2; ctx.stroke();
   const r = 86;
   dial(ctx, 112, 104, r, d.rpm, 2500, 500, '轉速 ×100', `檔位 ${d.gear}`, { labelDiv: 100, bands: [{ from: 1000, to: 1500, c: '#2ecc71' }, { from: 2100, to: 2500, c: '#e74c3c' }], big: d.gear });
-  dial(ctx, W - 112, 104, r, d.kmh, 120, 20, '公里/小時', d.cruise ? '定速' : '速度', { big: String(Math.round(d.kmh)) });
+  dial(ctx, W - 112, 104, r, d.kmh, 120, 20, '公里/小時', d.cruise ? `定速 ${d.cruise}` : '速度', { big: String(Math.round(d.kmh)) });
   const mx = W / 2;
   arrow(ctx, mx - 16, 24, -1, d.indL && d.blink);
   arrow(ctx, mx + 16, 24, 1, d.indR && d.blink);
@@ -195,7 +195,7 @@ export function drawCluster(cv, d) {
   lamp('煞車', d.brake, '#ff7a5a', 82);
   lamp('(P) 手煞車', d.handbrake, '#ff3b30', 100);
   lamp('氣壓過低', d.air < 0.4, '#ffb020', 118);
-  lamp('引擎', d.engineWarn, '#ffb020', 136);
+  lamp(d.engineOff ? '引擎熄火' : '引擎', d.engineWarn, '#ffb020', 136);
   ctx.globalAlpha = 1; ctx.fillStyle = d.manual ? '#ffd166' : '#8fd3ff'; ctx.fillText(d.manual ? '手排 M' : '自排 A', mx, 154);
   bar(ctx, 14, H - 18, 120, '油量', d.fuel, '#2ecc71', d.fuel < 0.15);
   bar(ctx, 140, H - 18, 118, '水溫', d.temp, '#4aa3ff', d.temp > 0.9);

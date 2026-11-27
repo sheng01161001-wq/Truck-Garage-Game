@@ -190,6 +190,8 @@ export const Snd = {
     const v = 0.5 * (1 - Math.min(0.8, dist * 0.6));
     this.burst(0.25, 'lowpass', 900, v * 0.6); this.burst(3.2, 'lowpass', 140, v, 0.05, 0.6); this.burst(2.2, 'lowpass', 320, v * 0.5, 0.25); this.tone(48, 2.4, 'sine', v * 0.5, 0.05, 30);
   },
+  // v40：起動馬達（嘰嘰嘰 → 引擎轉起來）
+  starter() { for (let i = 0; i < 7; i++) { this.burst(0.11, 'bandpass', 380 + i * 25, 0.12, i * 0.14, 1.5); this.tone(70 + i * 6, 0.12, 'sawtooth', 0.05, i * 0.14, null, 400); } this.burst(0.5, 'lowpass', 220, 0.3, 1.0); },
   airBrake() { this.burst(0.7, 'highpass', 2500, 0.22); this.burst(0.25, 'bandpass', 900, 0.15); },
   blowOff() { this.burst(0.45, 'bandpass', 2600, 0.06 + (this.lastBoost || 0) * 0.14, 0, 1.2); this.burst(0.2, 'highpass', 5000, 0.04 + (this.lastBoost || 0) * 0.05); this.spool = (this.spool || 0) * 0.4; },
   // 換檔：離合器一頓、變速箱「喀」一聲、氣動換檔的短短洩氣聲

@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v39';
+const VERSION = 'v40';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -305,6 +305,7 @@ const S = {
   route: null, routeT: 0, dirtDrawn: save.dirt, fuelCoinAcc: 0, wasStopped: true, lastSurface: 'road',
   y: 0, yA: 0, grade: 0, tunNear: false, tollSide: null,
   freeYaw: 2.4, freePitch: 0.35, camH: 1, dome: false,
+  engineOn: true, crank: 0, cruise: 0, highBeam: false, troll: 0, trollV: 0, physAcc: 0, // v40：引擎發動、定速、遠燈、拖車側傾、物理固定步長
   handbrake: false, air: 1, paused: false, coupled: false, parked: null, pendingPark: null, canCouple: false, camDist: 1, camPitch: 0, // v33：手煞車、氣壓（1＝10 bar）、暫停；v34 鏡頭距離
 };
 let rig = null;
@@ -335,7 +336,7 @@ function placeRig() {
   rig.cab.rotation.set(S.pitch, 0, S.roll);
   rig.trailer.position.set(x, y + S.bump * 0.6 + S.suspension * 0.55 + tipY, z);
   rig.trailer.rotation.set(pTr, th, tip);
-  rig.trailerBody.rotation.set(0, 0, S.roll * 0.6);
+  rig.trailerBody.rotation.set(0, 0, S.roll * 0.3 + S.troll);
   // v36：還沒連接的拖車停在裝貨點（沒有就不顯示）
   const loose = S.mode === 'drive' && !S.coupled; // 主選單、改裝廠：顯示接好的樣子
   rig.trailer.visible = !loose || !!S.parked;
@@ -631,6 +632,8 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'ControlLeft' || k === 'ControlRight' || k === 'PageDown') manualShift(-1);
   else if (k === 'KeyN') toggleSound();
   else if (k === 'KeyF') coupleTrailer();
+  else if (k === 'KeyI') toggleEngine();
+  else if (k === 'KeyV') toggleCruise();
   else if (k === 'BracketLeft') S.camH = clamp(S.camH - 0.15, 0.4, 2.2);
   else if (k === 'BracketRight') S.camH = clamp(S.camH + 0.15, 0.4, 2.2);
   else if (k === 'KeyO') { S.dome = !S.dome; Snd.click(); toast(S.dome ? '💡 車內燈：開' : '車內燈：關', 900); }
@@ -690,7 +693,24 @@ function toast(msg, ms = 2200) { const t = $('#toast'); t.textContent = msg; t.c
 function popup(msg) { const p = $('#popup'); p.textContent = msg; p.classList.remove('show'); void p.offsetWidth; p.classList.add('show'); }
 function updateCoins() { $('#coinNum').textContent = save.coins; $('#gCoins').textContent = save.coins; }
 function honk() { Snd.init(); if (S.hornT > 0) return; S.hornT = 0.4; Snd.horn(save.truck.horn); }
-function toggleLights() { S.lights = !S.lights; S.lightsManual = true; Snd.click(); refreshButtons(); }
+// v40：L 依序：關 → 近燈 → 遠燈 → 關
+function toggleLights() {
+  if (!S.lights) { S.lights = true; S.highBeam = false; } else if (!S.highBeam) S.highBeam = true; else { S.lights = false; S.highBeam = false; }
+  S.lightsManual = true; Snd.click(); refreshButtons(); toast(!S.lights ? '大燈：關' : S.highBeam ? '💡 遠燈（對向有車記得切回近燈）' : '💡 近燈', 900);
+}
+// v40：引擎發動／熄火（I）、定速巡航（V）
+function toggleEngine() {
+  if (S.crank > 0) return;
+  if (S.engineOn) { if (Math.abs(S.v) > 2) { toast('行駛中不能熄火', 1000); return; } S.engineOn = false; S.cruise = 0; Snd.click(); toast('🔑 引擎熄火（按 I 發動）', 1400); refreshButtons(); return; }
+  if (save.fuel <= 0) { toast('沒油了，發不動', 1400); Snd.no(); return; }
+  S.crank = 1.1; Snd.starter(); toast('🔑 發動中…', 900);
+}
+function updateEngine(dt) { if (S.crank > 0) { S.crank -= dt; if (S.crank <= 0) { S.crank = 0; S.engineOn = true; refreshButtons(); toast('引擎發動了', 900); } } }
+function toggleCruise() {
+  if (S.cruise) { S.cruise = 0; toast('定速巡航：關', 900); refreshButtons(); return; }
+  if (!S.engineOn || S.v < 8) { toast('時速 30 以上才能開定速巡航', 1300); return; }
+  S.cruise = S.v; toast(`🚀 定速巡航：${Math.round(S.v * 3.6)} km/h（踩煞車取消）`, 1600); refreshButtons();
+}
 function toggleWipers() { S.wipers = !S.wipers; Snd.click(); refreshButtons(); }
 // 排氣煞車（引擎煞車）：放開油門時幫忙減速，下坡比較不用一直踩煞車
 function toggleRetarder() { S.retarder = !S.retarder; Snd.click(); refreshButtons(); toast(S.retarder ? '🛑 排氣煞車：開' : '排氣煞車：關', 1000); }
@@ -705,7 +725,13 @@ function toggleGearbox() {
   toast(save.settings.gearbox === 'manual' ? '⚙️ 手排：Shift 升檔、Ctrl 降檔（平板按 ＋ －）' : '⚙️ 自排：會自己換檔', 2200);
 }
 function manualShift(dir) {
-  if (save.settings.gearbox !== 'manual' || S.gear < 0 || S.shiftT > 0) return;
+  if (save.settings.gearbox !== 'manual' || S.shiftT > 0) return;
+  // v40：手排 R ↔ N ↔ 1～12（倒檔、空檔要停著才換）
+  if (S.gear <= 0 || (S.gear === 1 && dir < 0)) {
+    const ng0 = clamp(S.gear + dir, -1, 1);
+    if (ng0 === -1 && Math.abs(S.v) > 0.5) { toast('要停下來才能打倒檔', 1000); return; }
+    S.gear = ng0; S.shiftT = 0.25; Snd.shift(); toast(ng0 === 0 ? '空檔 N' : ng0 < 0 ? '倒檔 R' : '1 檔', 700); return;
+  }
   const ng = clamp(S.gear + dir, 1, GEARS.length); if (ng === S.gear) return;
   // 降檔後轉速太高會傷引擎：不讓降
   const nrpm = (Math.abs(S.v) / RW) * 60 / (2 * Math.PI) * GEARS[ng - 1] * FINAL;
@@ -727,6 +753,7 @@ function refreshButtons() {
   $('#cLights').classList.toggle('on', S.lights); $('#cWipers').classList.toggle('on', S.wipers);
   $('#cRet')?.classList.toggle('on', S.retarder); // 舊版網頁快取沒有這顆按鈕時不要當掉
   $('#cPark')?.classList.toggle('on', S.handbrake);
+  $('#cEngine')?.classList.toggle('on', S.engineOn); $('#cCruise')?.classList.toggle('on', !!S.cruise);
   $('#cCouple')?.classList.toggle('on', S.coupled);
   const man = save.settings.gearbox === 'manual'; document.body.classList.toggle('manual', man);
   if ($('#cGbx')) $('#cGbx').innerHTML = man ? 'M<span>手排</span>' : 'A<span>自排</span>';
@@ -740,6 +767,7 @@ $('#cL').onclick = () => setIndicator('L'); $('#cR').onclick = () => setIndicato
 if ($('#cPark')) { $('#cPark').onclick = () => toggleHandbrake(); $('#cGbx').onclick = () => toggleGearbox(); $('#cUp').onclick = () => manualShift(1); $('#cDown').onclick = () => manualShift(-1); }
 if ($('#bMap')) $('#bMap').onclick = () => toggleMap();
 if ($('#cCouple')) $('#cCouple').onclick = () => coupleTrailer();
+if ($('#cEngine')) { $('#cEngine').onclick = () => toggleEngine(); $('#cCruise').onclick = () => toggleCruise(); }
 $('#cLights').onclick = () => toggleLights(); $('#cWipers').onclick = () => toggleWipers(); $('#cHorn').onclick = () => honk(); if ($('#cRet')) $('#cRet').onclick = () => toggleRetarder();
 let coinTaps = [];
 $('#coins').addEventListener('click', () => {
@@ -1247,10 +1275,12 @@ function drive(dt) {
   S.speedLimit = speedLimitAt(S.x, S.z, S.y);
   if (S.coupled && S.mission && S.mission.stage === 'deliver') { if (S.mission.danger) S.speedLimit = Math.min(S.speedLimit, 80); if (S.mission.heavy) S.speedLimit = Math.min(S.speedLimit, 60); } // v36：危險品、重型機械限速
   // 油門、煞車慢慢踩下去
-  S.thr += ((input.up ? 1 : 0) - S.thr) * Math.min(1, dt * 4);
+  if (S.cruise && (input.down || S.handbrake || S.v < 5 || !S.engineOn)) { S.cruise = 0; toast('定速巡航：取消', 900); }
+  const cruiseThr = S.cruise && !input.up ? clamp((S.cruise - S.v) * 0.6 + 0.25, 0, 1) : 0; // v40：定速巡航
+  S.thr += ((input.up ? 1 : cruiseThr) - S.thr) * Math.min(1, dt * 4);
   const brkIn = input.down ? 1 : 0;
   const noFuel = save.fuel <= 0;
-  const power = (1 - save.damage * 0.45) * (noFuel ? 0 : 1);
+  const power = (1 - save.damage * 0.45) * (noFuel || !S.engineOn ? 0 : 1); // v40：熄火沒有動力
   // 倒車：停住後按住煞車 0.3 秒
   if (S.gear > 0 && Math.abs(S.v) < 0.3 && input.down && !input.up) { S.revHold += dt; if (S.revHold > 0.3) { S.gear = -1; Snd.shift(); } } else if (S.gear > 0) S.revHold = 0;
   if (S.gear < 0 && input.up && Math.abs(S.v) < 0.3) { S.gear = 1; S.revHold = 0; Snd.shift(); }
@@ -1258,16 +1288,20 @@ function drive(dt) {
   const accelPedal = rev ? brkIn : S.thr;
   const brakePedal = rev ? (input.up ? 1 : 0) : brkIn;
   // 轉速
-  const ratio = rev ? R_GEAR : GEARS[S.gear - 1];
+  const neutral = S.gear === 0; // v40：手排的空檔 N
+  const ratio = rev ? R_GEAR : neutral ? 0 : GEARS[S.gear - 1];
   const wheelRpm = (Math.abs(S.v) / RW) * 60 / (2 * Math.PI);
   let rpm = wheelRpm * ratio * FINAL;
-  if (rpm < 600 + accelPedal * 700 && (rev || S.gear <= 2)) rpm = 600 + accelPedal * 700 * (1 - Math.min(1, rpm / 1300)) + rpm * 0.5; // 離合器半聯結
+  if (neutral) rpm = 600 + accelPedal * 1600; // 空檔踩油門只會空轉
+  else if (rpm < 600 + accelPedal * 700 && (rev || S.gear <= 2)) rpm = 600 + accelPedal * 700 * (1 - Math.min(1, rpm / 1300)) + rpm * 0.5; // 離合器半聯結
   rpm = Math.max(600, rpm);
+  if (!S.engineOn) rpm = S.crank > 0 ? 180 + Math.sin(S.time * 40) * 60 : 0; // 熄火（發動中＝起動馬達轉）
   S.rpm += (rpm - S.rpm) * Math.min(1, dt * 8);
   // 自動排檔
   if (S.shiftT > 0) S.shiftT -= dt;
   else if (!rev && save.settings.gearbox === 'manual') {
     if (Math.abs(S.v) < 0.5 && S.gear > 2 && accelPedal > 0) { S.gear = 1; Snd.shift(); } // 手排停下來忘記降檔：自動退到 1 檔（不會熄火）
+    if (neutral && accelPedal > 0.3 && !S.hint) S.hint = '現在是空檔 N：按 Shift（＋）打進 1 檔';
   }
   else if (!rev) {
     if (S.rpm > 1750 && S.gear < GEARS.length) { S.gear++; S.shiftT = 0.4; Snd.shift(); if (S.thr > 0.5) Snd.blowOff(); }
@@ -1277,7 +1311,7 @@ function drive(dt) {
   let F = 0;
   // v33：氣壓（踩煞車用掉、引擎轉著會補回來）；太低時彈簧煞車會自己煞住
   // 每踩一次煞車用掉一些氣（踩住不放不會一直漏），一直連續點煞車才會不夠
-  S.air = clamp(S.air - Math.max(0, brakePedal - (S.prevBrk || 0)) * 0.07 + dt * 0.03 * Math.min(1.4, S.rpm / 1300), 0, 1); S.prevBrk = brakePedal;
+  S.air = clamp(S.air - Math.max(0, brakePedal - (S.prevBrk || 0)) * 0.07 + (S.engineOn ? dt * 0.03 * Math.min(1.4, S.rpm / 1300) : 0), 0, 1); // 熄火時打氣機不會補氣 S.prevBrk = brakePedal;
   const springBrake = S.air < 0.18;
   if (S.handbrake && accelPedal > 0.3) S.hint = '🅿 手煞車還拉著！按空白鍵（平板按 🅿）放開';
   else if (springBrake) S.hint = '⚠️ 氣壓太低，煞車自己鎖住了：停著等氣壓回來';
@@ -1294,7 +1328,7 @@ function drive(dt) {
   const resist = crr * mass * 9.81 + 3.3 * S.v * S.v + (accelPedal < 0.05 ? 0.035 * mass * Math.min(1, Math.abs(S.v)) : 0);
   let a = F / mass - dir * resist / mass - 9.81 * S.grade; // 上坡變慢、下坡變快
   // 排氣煞車：放開油門時在中高轉速幫忙減速（重車更明顯），下坡用它控速
-  if (S.retarder && !rev && accelPedal < 0.05 && S.v > 3) a -= Math.min(1.4, 0.35 + S.rpm / 2400) * (0.6 + 0.4 * Math.min(1, tons / 20));
+  if (S.retarder && S.engineOn && !neutral && !rev && accelPedal < 0.05 && S.v > 3) a -= Math.min(1.4, 0.35 + S.rpm / 2400) * (0.6 + 0.4 * Math.min(1, tons / 20));
   // v32：不再自動壓到速限（之前市區最快只有 50）；超速只會提醒、影響送貨評價
   if (!rev && S.v > VMAX + save.company.engineLevel * 0.7 + 0.3) a -= (S.v - (VMAX + save.company.engineLevel * 0.7)) * 1.5;
   if (rev && S.v < -5) a += (-5 - S.v) * 1.5; // 倒車下坡也不會越倒越快
@@ -1323,7 +1357,7 @@ function drive(dt) {
   const px = S.x, pz = S.z, ph = S.heading, pth = S.trailerHeading;
   // 輪胎抓地力有上限：太快轉太急會推頭打滑（下雨、碎石路、載重時更早打滑）
   let yawRate = (S.v / L) * Math.tan(S.steer) * grip;
-  const latMax = 7.5 * grip; // 公尺/秒²
+  const latMax = 7.5 * grip * (S.coupled ? 1 - Math.min(0.18, tons / 160) : 1.05); // 公尺/秒²；v40：拖車重壓在第五輪，前輪抓地比例變少（重載容易推頭）
   const latNow = Math.abs(yawRate * S.v);
   S.slip = latNow > latMax ? Math.min(1, (latNow - latMax) / latMax) : Math.max(0, S.slip - dt * 2);
   if (latNow > latMax && Math.abs(S.v) > 1) yawRate *= latMax / latNow;
@@ -1337,6 +1371,9 @@ function drive(dt) {
     S.jackT += dt; S.trailerHeading -= Math.sign(relJ || S.steer) * 0.5 * Math.min(1, S.jackT) * dt;
     if (S.jackT > 0.6 && !S.hint) S.hint = '⚠️ 拖車快甩尾了！放開煞車、把方向盤回正';
   } else S.jackT = Math.max(0, S.jackT - dt * 2);
+  // v40：拖車自己的側傾（跟著拖車的轉彎離心力，載越重越傾）
+  { const tyr = wrapAngle(S.trailerHeading - pth) / Math.max(dt, 1e-3), aT = S.coupled ? tyr * S.v : 0, tT = clamp(aT * 0.02 * (1 + tons / 30) * (save.truck.suspension === 'air' ? 0.7 : 1), -0.12, 0.12);
+    S.trollV += ((tT - S.troll) * 40 - S.trollV * 7) * dt; S.troll += S.trollV * dt; }
   const rel = wrapAngle(S.heading - S.trailerHeading);
   if (Math.abs(rel) > 1.35) S.trailerHeading = S.heading - Math.sign(rel) * 1.35;
 
@@ -1394,7 +1431,7 @@ function drive(dt) {
   S.suspensionV += ((suspensionTarget - S.suspension) * 34 - S.suspensionV * 8.5) * dt;
   S.suspension += S.suspensionV * dt;
   // 油、水溫、髒污
-  save.fuel = clamp(save.fuel - (0.00012 + S.thr * (S.rpm / 2100) * 0.0011) * (1 - save.company.fuelLevel * 0.1) * dt, 0, 1);
+  if (S.engineOn) save.fuel = clamp(save.fuel - (0.00012 + S.thr * (S.rpm / 2100) * 0.0011) * (1 - save.company.fuelLevel * 0.1) * dt, 0, 1);
   S.temp += ((0.5 + S.thr * 0.3 * (S.rpm / 2100)) - S.temp) * dt * 0.05;
   save.dirt = clamp(save.dirt + dist * (surf === 'road' ? 0.000015 : 0.00015) * (wet ? 3 : 1), 0, 1);
   if (Math.abs(save.dirt - S.dirtDrawn) > 0.06) { S.dirtDrawn = save.dirt; rig.redrawDirt(save.dirt); }
@@ -1414,7 +1451,7 @@ function drive(dt) {
   // 方向燈自動回正
   if ((S.ind === 'L' || S.ind === 'R') && Math.abs(S.steer) > 0.25) S.indArmed = true;
   if (S.indArmed && Math.abs(S.steer) < 0.05) { S.ind = null; S.indArmed = false; refreshButtons(); }
-  Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel, inside: S.cam === 2, retard: S.retarder, storm: env.state.weather === 'storm' });
+  Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel && S.engineOn, inside: S.cam === 2, retard: S.retarder, storm: env.state.weather === 'storm' });
 }
 
 // 紅綠燈：前面紅燈會提醒；紅燈還開過路口就跳「闖紅燈」
@@ -1586,9 +1623,9 @@ function updateHud(dt) {
   }
   const tons = cargoTons();
   drawCluster(clusterCv, {
-    rpm: S.rpm, kmh: Math.abs(S.v) * 3.6, speedLimit: S.speedLimit, brakeTemp: S.brakeTemp, rollover: S.rollover, gear: S.gear < 0 ? 'R' : (Math.abs(S.v) < 0.05 && S.thr < 0.05 && save.settings.gearbox !== 'manual' ? 'N' : (save.settings.gearbox === 'manual' ? 'M' : 'A') + S.gear), handbrake: S.handbrake, air: S.air, odo: save.odo || 0, manual: save.settings.gearbox === 'manual',
+    rpm: S.rpm, kmh: Math.abs(S.v) * 3.6, speedLimit: S.speedLimit, brakeTemp: S.brakeTemp, rollover: S.rollover, gear: !S.engineOn ? 'OFF' : S.gear === 0 ? 'N' : S.gear < 0 ? 'R' : (Math.abs(S.v) < 0.05 && S.thr < 0.05 && save.settings.gearbox !== 'manual' ? 'N' : (save.settings.gearbox === 'manual' ? 'M' : 'A') + S.gear), handbrake: S.handbrake, air: S.air, highBeam: S.highBeam, cruise: S.cruise ? Math.round(S.cruise * 3.6) : 0, engineOff: !S.engineOn, odo: save.odo || 0, manual: save.settings.gearbox === 'manual',
     fuel: save.fuel, temp: S.temp, damage: save.damage, indL: S.ind === 'L' || S.ind === 'H', indR: S.ind === 'R' || S.ind === 'H', blink: S.blink,
-    lights: S.lights, wipers: S.wipers, brake: input.down || S.handbrake, engineWarn: save.damage > 0.6 || save.fuel <= 0, tons: Math.round(9 + (S.coupled ? (TRAILER_PHYS[curTrailer()] || TRAILER_PHYS.box).empty + tons : 0)), retarder: S.retarder,
+    lights: S.lights, wipers: S.wipers, brake: input.down || S.handbrake, engineWarn: save.damage > 0.6 || save.fuel <= 0 || !S.engineOn, tons: Math.round(9 + (S.coupled ? (TRAILER_PHYS[curTrailer()] || TRAILER_PHYS.box).empty + tons : 0)), retarder: S.retarder,
   });
   drawMinimap(mapCv, { x: S.x, z: S.z, heading: S.heading, route: S.route, target: m ? missionTarget() : null, time: S.time, night: env.state.night > 0.5, cars: traffic.positions(), incidents: traffic.incidents(), selectedFleet: S.followFleetId ? traffic.fleetObject(S.followFleetId)?.position : null });
 }
@@ -1744,7 +1781,12 @@ function frame(dt) {
   if (S.pendingPark && (!S.parked || Math.hypot(S.x - S.parked.x, S.z - S.parked.z) > 70)) { S.parked = S.pendingPark; S.pendingPark = null; }
   S.paused = S.mode === 'drive' && (!$('#menuPanel').classList.contains('hidden') || !$('#mapPanel').classList.contains('hidden'));
   if (S.paused) { releaseAll(); if (!$('#mapPanel').classList.contains('hidden')) renderMap(); }
-  if (S.mode === 'drive' && !S.paused) { drive(dt); checkMission(dt); }
+  if (S.mode === 'drive' && !S.paused) {
+    // v40：物理用固定步長（每秒 120 次），畫面快慢不影響開車手感
+    const STEP = 1 / 120; S.physAcc = Math.min(S.physAcc + dt, STEP * 8);
+    while (S.physAcc >= STEP) { drive(STEP); S.physAcc -= STEP; }
+    checkMission(dt); updateEngine(dt);
+  }
   else Snd.update({ rpm: 600, throttle: 0, speed: 0, surface: 'road', rain: false, running: S.mode !== 'title' || Snd.ctx, inside: false });
   S.shake = Math.max(0, S.shake - dt * 2.5);
   placeRig();
@@ -1763,12 +1805,12 @@ function frame(dt) {
   const braking = S.mode === 'drive' && ((input.down && S.gear > 0) || (input.up && S.gear < 0) || Math.abs(S.v) < 0.05);
   setTruckLights({ head: S.lights, brake: braking, indL: S.blink && (S.ind === 'L' || S.ind === 'H'), indR: S.blink && (S.ind === 'R' || S.ind === 'H'), reverse: S.gear < 0 });
   const lightsOn = S.lights && !inGarage();
-  rig.spots.forEach((s) => (s.intensity = lightsOn ? 900 : 0));
+  rig.spots.forEach((s) => { s.intensity = lightsOn ? (S.highBeam ? 1500 : 900) : 0; s.distance = S.highBeam ? 160 : 90; s.angle = S.highBeam ? 0.42 : 0.5; });
   if (rig.dome) rig.dome.intensity = S.dome && !inGarage() ? 2.4 : 0;
   if (S.mode === 'drive' && Math.abs(S.v) > 20) S.shake = Math.max(S.shake, (Math.abs(S.v) - 20) * 0.004); // v39：高速時鏡頭輕微震動
   // v32：大燈光錐＋照在路面上的光斑（越暗越明顯；下雨霧天光錐更清楚）
   const beamK = lightsOn && S.mode === 'drive' ? clamp(env.state.night * 1.1 + (env.state.weather === 'fog' || rainyW(env.state.weather) ? 0.25 : 0), 0, 1) : 0;
-  for (const b of rig.beams) { b.visible = beamK > 0.02; b.material.opacity = b.userData.base * beamK; }
+  for (const b of rig.beams) { b.visible = beamK > 0.02; b.material.opacity = b.userData.base * beamK * (S.highBeam ? 1.25 : 1); b.scale.set(1, S.highBeam ? 1.5 : 1, 1); }
   if (rig.chameleon) { const c = new THREE.Color().setHSL((S.time * 0.08) % 1, 0.85, 0.5); rig.paint.color.copy(c); rig.paintPlain.color.copy(c); if (rig.rimMat) rig.rimMat.color.copy(c); }
   if (rig.rainbowGlow) { const c = new THREE.Color().setHSL((S.time * 0.5) % 1, 1, 0.55); rig.glowMat.color.copy(c); rig.glowLight.color.copy(c); }
   // 紅綠燈、車流、路燈光
@@ -1945,8 +1987,8 @@ function renderMenu() {
       <button class="big-act red" data-act="reset">🗑 重新開始新遊戲（全部歸零）</button>`;
   } else {
     h += `<div class="howto"><div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 油門／煞車（停住後按住＝倒車）／方向盤</div>
-      <div><kbd>空白鍵</kbd> 手煞車　<kbd>R</kbd> 自排／手排　<kbd>Shift</kbd><kbd>Ctrl</kbd> 手排升檔／降檔</div>
-      <div><kbd>Q</kbd><kbd>E</kbd> 方向燈　<kbd>X</kbd> 警示燈　<kbd>L</kbd> 大燈　<kbd>K</kbd> 雨刷　<kbd>H</kbd> 喇叭　<kbd>J</kbd> 排氣煞車</div>
+      <div><kbd>I</kbd> 發動／熄火　<kbd>V</kbd> 定速巡航　<kbd>空白鍵</kbd> 手煞車　<kbd>R</kbd> 自排／手排　<kbd>Shift</kbd><kbd>Ctrl</kbd> 手排升降檔（1 檔再降＝空檔 N → 倒檔 R）</div>
+      <div><kbd>Q</kbd><kbd>E</kbd> 方向燈　<kbd>X</kbd> 警示燈　<kbd>L</kbd> 大燈（再按＝遠燈）　<kbd>K</kbd> 雨刷　<kbd>H</kbd> 喇叭　<kbd>J</kbd> 排氣煞車</div>
       <div><kbd>C</kbd> 換鏡頭（車尾／駕駛座／車頭／側面／自由／高空／路邊）　<kbd>滑鼠拖曳</kbd> 轉頭看　<kbd>滾輪</kbd> 遠近　<kbd>[</kbd><kbd>]</kbd> 高低　<kbd>O</kbd> 車內燈</div>
       <div><kbd>M</kbd> 世界地圖　<kbd>Esc</kbd> 遊戲選單</div>
       <div><kbd>T</kbd> 換時間　<kbd>Y</kbd> 換天氣　<kbd>G</kbd> 改裝廠　<kbd>N</kbd> 聲音　<kbd>Backspace</kbd> 回廠</div>
