@@ -23,6 +23,40 @@ kbd { display: inline-block; min-width: 24px; padding: 0 6px; margin-right: 3px;
 .btn-big:active { transform: translateY(2px); }
 .btn-big:disabled { background: #4a525b; color: #9aa4ae; box-shadow: none; }
 .load { margin-top: 10px; color: #8a96a3; font-size: 14px; }
+/* v38：卡車改裝王 X：深色工業風（黑、鐵灰、拉絲金屬）＋進場動畫 */
+#title { background: linear-gradient(90deg, rgba(6,7,9,.96) 0%, rgba(10,12,15,.82) 40%, rgba(10,12,15,0) 72%), repeating-linear-gradient(90deg, rgba(255,255,255,.012) 0 2px, transparent 2px 6px); }
+#title h1 { font-weight: 900; letter-spacing: 4px; background: linear-gradient(180deg, #ffffff 0%, #c9d1d9 45%, #7d8792 100%); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 4px 18px rgba(0,0,0,.7)); }
+#title h1 .x { background: linear-gradient(180deg, #ffcf6b, #ff8c00); -webkit-background-clip: text; background-clip: text; color: transparent; font-style: italic; }
+.t-kicker { letter-spacing: 3px !important; font-size: 12px !important; color: #ff9f1c; }
+.title-box { animation: tx-in .7s cubic-bezier(.2,.8,.2,1) both; }
+.tmenu .ti { animation: tx-item .5s cubic-bezier(.2,.8,.2,1) both; position: relative; overflow: hidden;
+  background: linear-gradient(180deg, #23272d 0%, #15181c 100%) !important; border: 1px solid #3a4048 !important; border-left: 4px solid #4a525c !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 6px 16px rgba(0,0,0,.35); }
+.tmenu .ti::after { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,.08) 50%, transparent 70%); transform: translateX(-120%); transition: transform .6s; pointer-events: none; }
+.tmenu .ti:hover::after { transform: translateX(120%); }
+.tmenu .ti:hover { border-left-color: #ff9f1c !important; background: linear-gradient(180deg, #2c3036 0%, #1a1d21 100%) !important; }
+.tmenu .ti.main { background: linear-gradient(180deg, #ffb547, #e07800) !important; border: 1px solid #ffc56b !important; border-left: 4px solid #fff0c8 !important; }
+.tmenu .ti:nth-child(1) { animation-delay: .05s } .tmenu .ti:nth-child(2) { animation-delay: .1s } .tmenu .ti:nth-child(3) { animation-delay: .14s } .tmenu .ti:nth-child(4) { animation-delay: .18s }
+.tmenu .ti:nth-child(5) { animation-delay: .22s } .tmenu .ti:nth-child(6) { animation-delay: .26s } .tmenu .ti:nth-child(7) { animation-delay: .3s } .tmenu .ti:nth-child(8) { animation-delay: .34s }
+.tmenu .ti:nth-child(9) { animation-delay: .38s } .tmenu .ti:nth-child(10) { animation-delay: .42s }
+@keyframes tx-in { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+@keyframes tx-item { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+#menuPanel:not(.hidden), #jobPanel:not(.hidden) { animation: tx-pop .28s cubic-bezier(.2,.8,.2,1); }
+@keyframes tx-pop { from { opacity: 0; transform: translate(-50%, -48%) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+#menuPanel { background: linear-gradient(180deg, #1b1e22, #101215) !important; border: 1px solid #3a4048 !important; }
+.career-head { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; margin-bottom: 10px; }
+.career-lv { width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 35% 30%, #ffcf6b, #c46a00); color: #1a1205; font-weight: 900; font-size: 28px; box-shadow: 0 0 0 4px #2a2e34, 0 0 24px rgba(255,159,28,.35); }
+.career-lv small { display: block; font-size: 11px; margin-top: -6px; }
+.xpbar { height: 12px; border-radius: 6px; background: #22272d; overflow: hidden; margin-top: 6px; } .xpbar i { display: block; height: 100%; background: linear-gradient(90deg, #ffb547, #ff8c00); }
+.cstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.cstats div { background: #191c20; border: 1px solid #2c3137; border-radius: 10px; padding: 8px; } .cstats small { color: #8f9aa5; display: block; } .cstats b { font-size: 17px; }
+.unlock { font-size: 13px; color: #b9c4cf; line-height: 1.8; }
+.truck-shop { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 14px; }
+.truck-shop article { background: #191c20; border: 1px solid #343a41; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.truck-shop article b { font-size: 16px; } .truck-shop article small { color: #9aa5b0; line-height: 1.5; }
+.truck-shop button { margin-top: auto; padding: 8px; border-radius: 9px; border: 0; background: linear-gradient(135deg,#ffd77f,#e99a2b); color: #17191c; font-weight: 900; cursor: pointer; }
+@media (max-width: 640px) { .cstats, .truck-shop { grid-template-columns: 1fr 1fr; } }
+.job.locked { opacity: .55; } .job.locked button { background: #3a4048; color: #aab4be; cursor: default; }
 /* v33：主選單（模擬駕駛遊戲風格：左側清單、細線分隔、選取時橘色條） */
 .tmenu { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0 6px; }
 .ti { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px 14px; border-radius: 10px; cursor: pointer;
@@ -334,3 +368,5 @@ body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: non
   body.touch #controls .cbtn span { font-size: 9px; }
   .tc { width: 70px; height: 70px; } .tc.gas { height: 92px; }
 }
+
+@media (prefers-reduced-motion: reduce) { .title-box, .tmenu .ti, #menuPanel:not(.hidden), #jobPanel:not(.hidden) { animation: none !important; } }

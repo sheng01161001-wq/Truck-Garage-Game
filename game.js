@@ -12,13 +12,14 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v37';
+const VERSION = 'v38';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
 
 // ================= 存檔 =================
 const SAVE_KEY = 'truckGarage_save_v1';
+const SAVE_VER = 3; // v38：存檔版本（之後改格式時依版本轉換，舊存檔照樣讀得到）
 const DEFAULT_TRUCK = {
   cabStyle: 'euro', trailerType: 'box',
   cabColor: '#b71c1c', cabColor2: '#ffb000', cabGradient: 'off', paint: 'normal', pattern: 'none', patternColor: '#ffd60a',
@@ -168,11 +169,11 @@ function loadSave() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { s = null; }
   const out = { coins: 500, owned: [], deliveries: 0, truck: { ...DEFAULT_TRUCK }, fleet: [], company: { name: '小棒槌物流', trucks: 1, engineLevel: 0, fuelLevel: 0, revenue: 0, expenses: 0, contracts: 0, wages: 0, maintenance: 0, fuelCost: 0, fleetLog: [], queuedCargo: null, fleetUnits: [] }, fuel: 1, damage: 0, dirt: 0.15,
-    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'mid' : 'high', traffic: 'normal', volume: 1, post: true, mirrors: true, fps: false, glb: true, gearbox: 'auto' }, odo: 0, loan: 0, loanT: 0, ledger: [], ach: [], flags: {} };
+    settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'mid' : 'high', traffic: 'normal', volume: 1, post: true, mirrors: true, fps: false, glb: true, gearbox: 'auto', steer: 'normal', shake: true, autoLights: true }, odo: 0, loan: 0, loanT: 0, ledger: [], xp: 0, ver: SAVE_VER, ach: [], flags: {} };
   if (s && typeof s === 'object') {
     if (Number.isFinite(s.coins) && s.coins >= 0) out.coins = Math.floor(s.coins);
     if (Array.isArray(s.owned)) out.owned = s.owned.filter((x) => typeof x === 'string');
-    if (Array.isArray(s.fleet)) out.fleet = s.fleet.filter((v) => v && typeof v.id === 'string' && v.truck && typeof v.truck === 'object').slice(0, 8).map((v) => ({ id: v.id.slice(0, 40), name: String(v.name || '我的卡車').slice(0, 16), truck: { ...DEFAULT_TRUCK, ...v.truck }, photo: typeof v.photo === 'string' && v.photo.startsWith('data:image/') ? v.photo : '', savedAt: Number.isFinite(v.savedAt) ? v.savedAt : Date.now() }));
+    if (Array.isArray(s.fleet)) out.fleet = s.fleet.filter((v) => v && typeof v.id === 'string' && v.truck && typeof v.truck === 'object').slice(0, 8).map((v) => ({ id: v.id.slice(0, 40), name: String(v.name || '我的卡車').slice(0, 16), truck: { ...DEFAULT_TRUCK, ...v.truck }, photo: typeof v.photo === 'string' && v.photo.startsWith('data:image/') ? v.photo : '', savedAt: Number.isFinite(v.savedAt) ? v.savedAt : Date.now(), bought: Number.isFinite(v.bought) ? clamp(Math.round(v.bought), 0, 100000) : 0 }));
     if (s.company && typeof s.company === 'object') {
       const c = s.company;
       if (typeof c.name === 'string') out.company.name = c.name.slice(0, 20);
@@ -193,6 +194,8 @@ function loadSave() {
     for (const k of ['fuel', 'damage', 'dirt']) if (Number.isFinite(s[k])) out[k] = clamp(s[k], 0, 1);
     if (Number.isFinite(s.odo)) out.odo = Math.max(0, s.odo);
     if (Number.isFinite(s.loan)) out.loan = clamp(Math.round(s.loan), 0, 50000);
+    if (Number.isFinite(s.xp)) out.xp = Math.max(0, Math.round(s.xp));
+    else if (Number.isFinite(s.deliveries)) out.xp = Math.round(s.deliveries * 120); // 舊存檔：照送貨次數補經驗值
     if (Number.isFinite(s.loanT)) out.loanT = Math.max(0, s.loanT);
     if (Array.isArray(s.ledger)) out.ledger = s.ledger.filter((e) => e && Number.isFinite(e.v) && typeof e.cat === 'string').slice(0, 200).map((e) => ({ t: Number(e.t) || 0, cat: e.cat.slice(0, 12), note: String(e.note || '').slice(0, 40), v: Math.round(e.v) }));
     if (s.truck && typeof s.truck === 'object') {
@@ -212,6 +215,8 @@ function loadSave() {
       if (typeof s.settings.glb === 'boolean') out.settings.glb = s.settings.glb;
       if (typeof s.settings.music === 'boolean') out.settings.music = s.settings.music;
       if (['auto', 'manual'].includes(s.settings.gearbox)) out.settings.gearbox = s.settings.gearbox;
+      if (['low', 'normal', 'high'].includes(s.settings.steer)) out.settings.steer = s.settings.steer;
+      for (const k of ['shake', 'autoLights']) if (typeof s.settings[k] === 'boolean') out.settings[k] = s.settings[k];
       if (['few', 'normal', 'many'].includes(s.settings.traffic)) out.settings.traffic = s.settings.traffic;
       if (Number.isFinite(s.settings.volume)) out.settings.volume = clamp(s.settings.volume, 0, 1);
       for (const k of ['post', 'mirrors', 'fps']) if (typeof s.settings[k] === 'boolean') out.settings[k] = s.settings[k];
@@ -348,6 +353,9 @@ const CARGOS = [
 const CARGO_CATS = { '一般貨物': '📦', '貨櫃': '🚢', '鋼材': '🔩', '木材': '🌲', '建築材料': '🧱', '重型機械': '🚜', '冷凍貨物': '❄️', '危險品': '⚠️' };
 const TRAILER_N = { box: '廂型拖車', flat: '平板拖車', dump: '砂石斗' };
 const cargoRule = (j) => j.danger ? '不能進隧道、限速 80' : j.heavy ? '超重、限速 60' : j.fresh ? '要準時，遲到會壞' : j.fragile ? '易碎，輕輕開' : '';
+// v38：職業等級（經驗值每級需要越來越多）、高等級才能接的貨
+const levelOf = (xp) => { let lv = 1, need = 500, left = xp; while (left >= need && lv < 50) { left -= need; lv++; need = Math.round(need * 1.18); } return { lv, cur: left, need }; };
+const CAT_LEVEL = { '危險品': 3, '重型機械': 4, '貨櫃': 2 };
 // 目前拖的拖車種類：有任務就用任務的拖車，不然用自己改裝的
 const curTrailer = () => (S.mission && S.mission.tr) || save.truck.trailerType;
 const CONTRACTS = [
@@ -499,7 +507,8 @@ function renderJobBoard() {
     const A = DEPOTS[j.from], B = DEPOTS[j.to], km = j.routeLen >= 1000 ? (j.routeLen / 1000).toFixed(1) + ' 公里' : Math.round(j.routeLen) + ' 公尺';
     const tags = [`${CARGO_CATS[j.cat] || '📦'} ${j.cat || '一般貨物'}`, j.urgent ? '⏱ 急件' : '', j.fragile ? '🥚 易碎' : '', j.fresh ? '🧊 生鮮' : '', j.heavy ? '🏋️ 超重' : j.tons >= 20 ? '🏋️ 重貨' : ''].filter(Boolean).map((t) => `<span>${t}</span>`).join('');
     const rule = cargoRule(j);
-    return `<div class="job ${j.danger ? 'danger' : ''}"><div class="cg">${j.cargo}</div><small>${j.tons} 噸｜${TRAILER_N[j.tr] || '拖車'}｜${km}</small><small>${A.emoji} ${A.name} → ${B.emoji} ${B.name}</small><div class="tags">${tags}</div>${rule ? `<small class="rule">📌 ${rule}</small>` : ''}<small>時限 ${mmss(j.deadline)}｜預估運費</small><div class="pay">💰 ${j.reward}</div><button data-job="${i}">${i === 0 && hereIdx != null ? '就在這裡裝貨' : '接這張'}</button></div>`;
+    const needLv = CAT_LEVEL[j.cat] || 1, locked = levelOf(save.xp || 0).lv < needLv;
+    return `<div class="job ${j.danger ? 'danger' : ''} ${locked ? 'locked' : ''}"><div class="cg">${j.cargo}</div><small>${j.tons} 噸｜${TRAILER_N[j.tr] || '拖車'}｜${km}</small><small>${A.emoji} ${A.name} → ${B.emoji} ${B.name}</small><div class="tags">${tags}</div>${rule ? `<small class="rule">📌 ${rule}</small>` : ''}<small>時限 ${mmss(j.deadline)}｜預估運費</small><div class="pay">💰 ${j.reward}</div><button data-job="${i}" ${locked ? 'disabled' : ''}>${locked ? `🔒 等級 ${needLv} 解鎖` : i === 0 && hereIdx != null ? '就在這裡裝貨' : '接這張'}</button></div>`;
   }).join('') || '<div class="studio-note">沒有符合條件的訂單，換個篩選條件或按「換一批」</div>'}</div>`;
   $('#jobBody').innerHTML = h;
   $('#jobPanel').classList.remove('hidden');
@@ -512,6 +521,7 @@ $('#jobBody').addEventListener('click', (e) => {
   if (e.target.closest('[data-jrefresh]')) { showJobBoard(null, jobHere); Snd.click(); return; }
   const b = e.target.closest('[data-job]'); if (!b) return;
   const j = jobOffers[Number(b.dataset.job)]; if (!j) return;
+  if (levelOf(save.xp || 0).lv < (CAT_LEVEL[j.cat] || 1)) { toast(`職業等級 ${CAT_LEVEL[j.cat]} 才能接「${j.cat}」`, 1600); return; }
   newMission(null, null, j); closeJobBoard(); Snd.buy(); toast(`📋 接單：${j.cargo}，先到「${DEPOTS[j.from].name}」接${TRAILER_N[j.tr] || '拖車'}，再送到「${DEPOTS[j.to].name}」`, 3200);
 });
 if ($('#bJobs')) $('#bJobs').onclick = () => { if (S.mission && S.mission.stage === 'deliver') { toast('貨還在車上，先送到再接新的單', 1600); return; } showJobBoard(); };
@@ -566,6 +576,9 @@ function checkMission(dt) {
       if (m.speeding > 10) { stars--; notes.push(`超速 ${Math.round(m.speeding)} 秒`); }
       stars = clamp(stars, 1, 5);
       money(payout, '送貨', m.cargo); save.deliveries++;
+      const lv0 = levelOf(save.xp || 0).lv, gain = Math.round(60 + m.reward / 8 + stars * 25 + (m.danger || m.heavy ? 60 : 0));
+      save.xp = (save.xp || 0) + gain; const lv1 = levelOf(save.xp).lv;
+      setTimeout(() => toast(lv1 > lv0 ? `🎖 升級了！職業等級 ${lv1}${Object.entries(CAT_LEVEL).filter(([, l]) => l === lv1).map(([c]) => `，解鎖「${c}」`).join('')}` : `🎖 經驗值 +${gain}`, 2600), 900);
       save.jobs = save.jobs || { done: 0, stars: 0 }; save.jobs.done++; save.jobs.stars += stars; addHistory('送貨', payout);
       // v31：成就用的紀錄
       const fl = save.flags = save.flags || {}, dk = DEPOTS[m.to].kind;
@@ -753,7 +766,7 @@ function effectiveTime() { if (save.settings.time !== 'auto') return save.settin
 function applyEnv() {
   const st = env.apply(effectiveTime(), save.settings.weather);
   setNight(st.night); setWet(st.wet); setSnow(st.snow ? 1 : 0);
-  if (!S.lightsManual) S.lights = st.night > 0.3 || !['clear', 'overcast'].includes(save.settings.weather);
+  if (!S.lightsManual && save.settings.autoLights !== false) S.lights = st.night > 0.3 || !['clear', 'overcast'].includes(save.settings.weather);
   S.wipers = rainyW(save.settings.weather) || save.settings.weather === 'snow';
   refreshButtons();
 }
@@ -881,8 +894,10 @@ function renderGarage() {
       + secHtml('寫在拖車上的名字（最多 8 個字）') + `<input class="name-in" id="nameIn" maxlength="8" value="${escapeHtml(draft.name)}" placeholder="例如：小明號">`;
   }
   else if (S.gTab === 'fleet') {
-    h = `<div class="fleet-intro"><b>TRUCK COLLECTION / 專屬卡車收藏</b><small>把目前改裝完成的卡車保存成獨立車款。載入收藏不會覆蓋其他收藏；最多保存 8 台。</small><button class="fleet-save-current" data-fleet-save>＋ 收藏目前卡車</button><div class="fleet-count">收藏數：${save.fleet.length} / 8</div></div>`;
-    h += save.fleet.length ? `<div class="fleet-grid">${save.fleet.map(v => `<article class="fleet-card"><div class="fleet-photo">${v.photo ? `<img src="${v.photo}" alt="${escapeHtml(v.name)} 展示照">` : '<span>🚛</span><small>尚未拍攝展示照</small>'}</div><div class="fleet-card-info"><input class="fleet-name" maxlength="16" value="${escapeHtml(v.name)}" aria-label="卡車名稱" data-fleet-name="${v.id}"><small>${escapeHtml(v.truck.cabStyle === 'us' ? '美式長鼻' : '歐式平頭')}・${escapeHtml(v.truck.trailerType || 'box')}・${escapeHtml(v.truck.paint || 'normal')} 烤漆</small><div class="fleet-actions"><button data-fleet-load="${v.id}">載入車款</button><button data-fleet-photo="${v.id}">拍攝展示照</button><button class="danger" data-fleet-delete="${v.id}">刪除</button></div></div></article>`).join('')}</div>` : '<div class="fleet-empty">🚛<b>車庫還沒有收藏</b><small>先完成一台喜歡的卡車，再按「收藏目前卡車」。</small></div>';
+    h = `<div class="fleet-intro"><b>MY TRUCKS / 我的卡車</b><small>買新卡車：整台車連零件一起買，之後隨時換開；買來的車可以用半價賣掉。</small></div>
+      <div class="truck-shop">${NEW_TRUCKS.map((t) => `<article><b>${t.icon} ${t.name}</b><small>${t.desc}</small><small>💰 ${t.price.toLocaleString()}</small><button data-buy-truck="${t.id}">購買</button></article>`).join('')}</div>`;
+    h += `<div class="fleet-intro"><b>TRUCK COLLECTION / 專屬卡車收藏</b><small>把目前改裝完成的卡車保存成獨立車款。載入收藏不會覆蓋其他收藏；最多保存 8 台。</small><button class="fleet-save-current" data-fleet-save>＋ 收藏目前卡車</button><div class="fleet-count">收藏數：${save.fleet.length} / 8</div></div>`;
+    h += save.fleet.length ? `<div class="fleet-grid">${save.fleet.map(v => `<article class="fleet-card"><div class="fleet-photo">${v.photo ? `<img src="${v.photo}" alt="${escapeHtml(v.name)} 展示照">` : '<span>🚛</span><small>尚未拍攝展示照</small>'}</div><div class="fleet-card-info"><input class="fleet-name" maxlength="16" value="${escapeHtml(v.name)}" aria-label="卡車名稱" data-fleet-name="${v.id}"><small>${escapeHtml(v.truck.cabStyle === 'us' ? '美式長鼻' : '歐式平頭')}・${escapeHtml(v.truck.trailerType || 'box')}・${escapeHtml(v.truck.paint || 'normal')} 烤漆</small><div class="fleet-actions"><button data-fleet-load="${v.id}">載入車款</button><button data-fleet-photo="${v.id}">拍攝展示照</button>${v.bought ? `<button class="danger" data-fleet-sell="${v.id}">賣掉 💰${Math.round(v.bought / 2).toLocaleString()}</button>` : `<button class="danger" data-fleet-delete="${v.id}">刪除</button>`}</div></div></article>`).join('')}</div>` : '<div class="fleet-empty">🚛<b>車庫還沒有收藏</b><small>先完成一台喜歡的卡車，再按「收藏目前卡車」。</small></div>';
   }
   else if (S.gTab === 'company') {
     const c = save.company, engineCosts = [3200, 6800, 12500], fuelCosts = [2600, 5600, 9800];
@@ -951,6 +966,28 @@ $('#gBody').addEventListener('change', async e=>{
 });
 $('#gBody').addEventListener('click',e=>{const b=e.target.closest('[data-art-remove]');if(!b)return;const key=b.dataset.artRemove==='cab'?'cabDecal':'trailerDecal';draft[key+'Data']='';save.truck[key+'Data']='';persist();rebuildRig(draft);renderGarage();toast('已移除彩繪圖片');});
 
+// v38：買新卡車（整台含零件）、賣掉買來的車
+const NEW_TRUCKS = [
+  { id: 'city', icon: '🚚', name: '城市配送型', price: 9000, desc: '美式長鼻、550 匹、全天候輪胎，市區好開', cfg: { cabStyle: 'us', engine: 'e550', tires: 'allweather', cabColor: '#f5f5f5', bumper: 'chromeb', name: '城市配送' } },
+  { id: 'long', icon: '🚛', name: '長途旗艦型', price: 22000, desc: '歐式平頭、650 匹、14 速、氣壓懸吊、導流罩，國道長途最舒服', cfg: { cabStyle: 'euro', engine: 'e650', gbx: 'g14', suspension: 'air', spoiler: 'on', skirts: 'on', cabColor: '#1a237e', sidelights: 'white', name: '長途旗艦' } },
+  { id: 'heavy', icon: '🏗️', name: '重載工程型', price: 18000, desc: '歐式平頭、650 匹、陶瓷煞車、加高底盤、鐵牛欄，重貨山路專用', cfg: { cabStyle: 'euro', engine: 'e650', brakes: 'ceramic', chassis: 'lift', bumper: 'bull', stacks: 'on', cabColor: '#f9a825', name: '重載工程' } },
+];
+function buyNewTruck(id) {
+  const t = NEW_TRUCKS.find((x) => x.id === id); if (!t) return;
+  if (save.coins < t.price) { toast(`金幣不夠，還差 ${(t.price - save.coins).toLocaleString()}`, 1800); Snd.no(); return; }
+  if (save.fleet.length >= 8) { toast('收藏車庫已滿（最多 8 台），請先賣掉或刪除一台', 2000); return; }
+  money(-t.price, '買車', t.name);
+  for (const [k, v] of Object.entries(t.cfg)) if (ITEM_KEYS.includes(k) && !isOwned(k, v)) save.owned.push(ownKey(k, v)); // 車上的零件都算你的
+  const truck = { ...DEFAULT_TRUCK, ...t.cfg };
+  save.fleet.unshift({ id: `truck-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: t.name, truck, photo: '', savedAt: Date.now(), bought: t.price });
+  persist(); Snd.buy(); toast(`🚛 買了「${t.name}」！按「載入車款」就能開`, 2400); renderGarage();
+}
+function sellFleetTruck(id) {
+  const i = save.fleet.findIndex((v) => v.id === id); if (i < 0 || !save.fleet[i].bought) return;
+  const v = save.fleet[i], price = Math.round(v.bought / 2);
+  if (!confirm(`確定用 ${price.toLocaleString()} 金幣賣掉「${v.name}」？`)) return;
+  save.fleet.splice(i, 1); money(price, '賣車', v.name); persist(); Snd.coin(); toast(`💰 賣掉「${v.name}」+${price.toLocaleString()}`, 2000); renderGarage();
+}
 // F：多台卡車收藏、切換與展示照
 function saveCurrentToFleet() {
   if (save.fleet.length >= 8) { toast('收藏車庫已滿（最多 8 台），請先刪除一台'); return; }
@@ -982,6 +1019,8 @@ function captureFleetPhoto(id, afterLoad = false) {
 $('#gBody').addEventListener('click', e => {
   const saveBtn=e.target.closest('[data-fleet-save]'); if(saveBtn){saveCurrentToFleet();return;}
   const loadBtn=e.target.closest('[data-fleet-load]'); if(loadBtn){loadFleetTruck(loadBtn.dataset.fleetLoad);return;}
+  const buyT=e.target.closest('[data-buy-truck]'); if(buyT){buyNewTruck(buyT.dataset.buyTruck);return;}
+  const sellT=e.target.closest('[data-fleet-sell]'); if(sellT){sellFleetTruck(sellT.dataset.fleetSell);return;}
   const photoBtn=e.target.closest('[data-fleet-photo]'); if(photoBtn){captureFleetPhoto(photoBtn.dataset.fleetPhoto);return;}
   const delBtn=e.target.closest('[data-fleet-delete]'); if(delBtn){const i=save.fleet.findIndex(v=>v.id===delBtn.dataset.fleetDelete);if(i>=0){const [removed]=save.fleet.splice(i,1);if(!persist()){save.fleet.splice(i,0,removed);toast('刪除失敗，儲存空間異常');return;}renderGarage();toast('已刪除收藏車款');}return;}
 });
@@ -1268,7 +1307,8 @@ function drive(dt) {
 
   // 轉向：方向盤慢慢轉，車速越快能轉的角度越小
   const target = ((input.left ? 1 : 0) - (input.right ? 1 : 0)) * (0.6 / (1 + Math.abs(S.v) * 0.07));
-  const rate = target === 0 ? 1.8 : 1.1;
+  const sk = { low: 0.7, normal: 1, high: 1.4 }[save.settings.steer] || 1; // v38：方向盤靈敏度
+  const rate = (target === 0 ? 1.8 : 1.1) * sk;
   S.steer += clamp(target - S.steer, -rate * dt, rate * dt);
 
   const px = S.x, pz = S.z, ph = S.heading, pth = S.trailerHeading;
@@ -1485,7 +1525,7 @@ function updateCamera(dt) {
   const k = inGarage() ? Math.min(1, dt * 6) : Math.min(1, dt * 3.2);
   camPos.lerp(want, k); camLook.lerp(look, k);
   camera.position.copy(camPos);
-  if (S.shake > 0) camera.position.add(tmpV.set((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake, 0));
+  if (S.shake > 0 && save.settings.shake !== false) camera.position.add(tmpV.set((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake, 0));
   camera.lookAt(camLook);
 }
 
@@ -1691,7 +1731,7 @@ function frame(dt) {
   const lightsOn = S.lights && !inGarage();
   rig.spots.forEach((s) => (s.intensity = lightsOn ? 900 : 0));
   // v32：大燈光錐＋照在路面上的光斑（越暗越明顯；下雨霧天光錐更清楚）
-  const beamK = lightsOn ? clamp(env.state.night * 1.1 + (env.state.weather === 'fog' || rainyW(env.state.weather) ? 0.25 : 0), 0, 1) : 0;
+  const beamK = lightsOn && S.mode === 'drive' ? clamp(env.state.night * 1.1 + (env.state.weather === 'fog' || rainyW(env.state.weather) ? 0.25 : 0), 0, 1) : 0;
   for (const b of rig.beams) { b.visible = beamK > 0.02; b.material.opacity = b.userData.base * beamK; }
   if (rig.chameleon) { const c = new THREE.Color().setHSL((S.time * 0.08) % 1, 0.85, 0.5); rig.paint.color.copy(c); rig.paintPlain.color.copy(c); if (rig.rimMat) rig.rimMat.color.copy(c); }
   if (rig.rainbowGlow) { const c = new THREE.Color().setHSL((S.time * 0.5) % 1, 1, 0.55); rig.glowMat.color.copy(c); rig.glowLight.color.copy(c); }
@@ -1812,7 +1852,7 @@ function renderTitleStats() {
 function openMenu(tab) { menuTab = tab; renderMenu(); $('#menuPanel').classList.remove('hidden'); Snd.click(); }
 function closeMenu() { $('#menuPanel').classList.add('hidden'); renderTitleStats(); }
 function renderMenu() {
-  const tabs = [...(S.mode === 'drive' ? [['pause', '⏸ 暫停']] : []), ['money', '💰 財務'], ['ach', '🏆 成就'], ['settings', '⚙️ 設定'], ['save', '💾 存檔'], ['help', '🎓 操作說明']];
+  const tabs = [...(S.mode === 'drive' ? [['pause', '⏸ 暫停']] : []), ['career', '🎖 生涯'], ['money', '💰 財務'], ['drive', '🕹 駕駛'], ['settings', '⚙️ 設定'], ['save', '💾 存檔'], ['ach', '🏆 成就'], ['help', '🎓 說明']];
   if (menuTab === 'pause' && S.mode !== 'drive') menuTab = 'ach';
   let h = `<div class="mp-head"><span>選單</span><button id="mpClose">關閉</button></div><div class="mp-tabs">${tabs.map(([k, n]) => `<button data-mtab="${k}" class="${menuTab === k ? 'sel' : ''}">${n}</button>`).join('')}</div>`;
   const opt = (k, v, label) => `<button class="opt ${save.settings[k] === v ? 'sel' : ''}" data-set="${k}" data-val="${v}">${label}</button>`;
@@ -1824,6 +1864,21 @@ function renderMenu() {
       <button class="big-act" data-act="money">💰 財務（貸款、收支帳本）</button>
       <button class="big-act" data-act="garage">🔧 改裝廠（要先停車）</button>
       <button class="big-act" data-act="title">🏠 回主選單</button>`;
+  } else if (menuTab === 'career') {
+    const L = levelOf(save.xp || 0), j = save.jobs || { done: 0, stars: 0 }, earned = (save.ledger || []).filter((e) => e.cat === '送貨').reduce((a, e) => a + e.v, 0);
+    const title = L.lv >= 15 ? '傳奇運輸王' : L.lv >= 10 ? '資深老司機' : L.lv >= 6 ? '專業司機' : L.lv >= 3 ? '正式司機' : '見習司機';
+    h += `<div class="career-head"><div class="career-lv">${L.lv}<small>等級</small></div><div><b style="font-size:20px">${escapeHtml(save.truck.name || '我的卡車')}｜${title}</b><div class="studio-note" style="margin:2px 0">${escapeHtml(save.company.name)}　經驗值 ${L.cur} / ${L.need}</div><div class="xpbar"><i style="width:${Math.round(L.cur / L.need * 100)}%"></i></div></div></div>
+      <div class="cstats"><div><small>送貨趟數</small><b>${save.deliveries}</b></div><div><small>平均評價</small><b>${j.done ? '⭐ ' + (j.stars / j.done).toFixed(1) : '—'}</b></div><div><small>總里程</small><b>${((save.odo || 0) / 1000).toFixed(1)} 公里</b></div>
+      <div><small>現金</small><b>💰 ${save.coins.toLocaleString()}</b></div><div><small>貸款</small><b>${(save.loan || 0).toLocaleString()}</b></div><div><small>公司卡車</small><b>${save.company.trucks} 台</b></div>
+      <div><small>最近送貨收入</small><b>${earned.toLocaleString()}</b></div><div><small>成就</small><b>${(save.ach || []).length} / ${ACH.length}</b></div><div><small>收藏卡車</small><b>${save.fleet.length} 台</b></div></div>
+      <div class="unlock"><b>等級解鎖：</b>${Object.entries(CAT_LEVEL).map(([c, l]) => `${L.lv >= l ? '✅' : '🔒'} 等級 ${l}「${c}」`).join('　')}<br>送貨經驗值：基本 60 ＋ 運費 ÷ 8 ＋ 每顆星 25（危險品、重型機械再加 60）</div>`;
+  } else if (menuTab === 'drive') {
+    h += `<div class="set-row"><span>變速箱（R 切換）</span><div class="opts">${opt('gearbox', 'auto', '自排')}${opt('gearbox', 'manual', '手排')}</div></div>
+      <div class="set-row"><span>方向盤靈敏度</span><div class="opts">${opt('steer', 'low', '慢（穩）')}${opt('steer', 'normal', '標準')}${opt('steer', 'high', '快（靈活）')}</div></div>
+      <div class="set-row"><span>鏡頭震動（高速、碰撞）</span><div class="opts">${opt('shake', true, '開')}${opt('shake', false, '關')}</div></div>
+      <div class="set-row"><span>天暗自動開大燈</span><div class="opts">${opt('autoLights', true, '開')}${opt('autoLights', false, '關')}</div></div>
+      <div class="set-row"><span>駕駛座後照鏡</span><div class="opts">${opt('mirrors', true, '開')}${opt('mirrors', false, '關')}</div></div>
+      <div class="studio-note">鍵盤：W/S 油門煞車、A/D 轉向、C 換鏡頭、空白鍵手煞車、R 自排手排、Shift/Ctrl 升降檔、I 發動／熄火、V 定速巡航、L 大燈（再按遠燈）、X 雙黃燈。完整按鍵在「🎓 說明」。</div>`;
   } else if (menuTab === 'money') {
     const L = save.ledger || [], inc = L.filter((e) => e.v > 0).reduce((a, e) => a + e.v, 0), exp = L.filter((e) => e.v < 0).reduce((a, e) => a + e.v, 0);
     const byCat = {}; for (const e of L) byCat[e.cat] = (byCat[e.cat] || 0) + e.v;
@@ -1925,7 +1980,7 @@ if (save.settings.glb !== false) loadTruckGLB().then((ok) => { if (ok) rebuildRi
 applyEnv();
 resize();
 updateCoins();
-$('#ver').textContent = '卡車改裝王 ' + VERSION;
+$('#ver').textContent = '卡車改裝王 X ' + VERSION;
 $('#startBtn').disabled = false; $('#loadMsg').textContent = '';
 function startDriving(tutorial = false) {
   Snd.init(); Snd.setVolume(save.settings.volume ?? 1); Snd.setMusic(save.settings.music !== false);
@@ -1953,7 +2008,7 @@ document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click'
   else if (g === 'mods') goGarageTab('parts');
   else if (g === 'fleet') goGarageTab('company');
   else if (g === 'map') toggleMap(true);
-  else if (g === 'settings' || g === 'save') openMenu(g);
+  else if (g === 'settings' || g === 'save' || g === 'career' || g === 'drive') openMenu(g);
 }));
 if (sessionStorage.getItem('truckAutoStart')) { sessionStorage.removeItem('truckAutoStart'); setTimeout(() => startDriving(true), 300); }
 
