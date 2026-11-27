@@ -4,6 +4,7 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { rng } from './util.js';
 
 const TIMES = {
+  dawn: { elev: 3, azim: 95, lightElev: 6, sunColor: 0xffb48a, sunI: 3.0, hemiSky: 0xa9b8d8, hemiGround: 0x4a4038, hemiI: 0.7, turb: 6, ray: 2.6, mie: 0.01, mieG: 0.93, exposure: 0.72, fog: 0xe6c0b0, envI: 0.8, night: 0.35 }, // v37：日出（東邊、粉橘色）
   day: { elev: 50, azim: 140, lightElev: 38, sunColor: 0xffead2, sunI: 3.0, hemiSky: 0xbcd6ff, hemiGround: 0x4f5a3c, hemiI: 1.0, turb: 3, ray: 1.1, mie: 0.004, mieG: 0.8, exposure: 0.62, fog: 0xbfd0df, envI: 1.0, night: 0 },
   dusk: { elev: 2.5, azim: 250, lightElev: 7, sunColor: 0xff9248, sunI: 3.8, hemiSky: 0x9a88b8, hemiGround: 0x4a3a30, hemiI: 0.65, turb: 9, ray: 3, mie: 0.012, mieG: 0.95, exposure: 0.75, fog: 0xd0a080, envI: 0.85, night: 0.45 },
   night: { elev: -14, azim: 200, lightElev: 42, sunColor: 0x9fb4ff, sunI: 0.32, hemiSky: 0x2a3658, hemiGround: 0x0c0e12, hemiI: 0.45, turb: 1.5, ray: 0.4, mie: 0.003, mieG: 0.7, exposure: 0.75, fog: 0x0c1322, envI: 0.25, night: 1 },
@@ -93,12 +94,12 @@ export function createEnv(renderer, scene) {
   function apply(time, weather, mix = null, regen = true) {
     state.time = time; state.weather = weather;
     const P = mix || TIMES[time];
-    const rainy = weather === 'rain', foggy = weather === 'fog', snowy = weather === 'snow';
+    const storm = weather === 'storm', rainy = weather === 'rain' || storm, foggy = weather === 'fog', snowy = weather === 'snow', over = weather === 'overcast'; // v37：陰天、大雨
     const u = sky.material.uniforms;
     for (const s of [sky, envSky]) {
       const uu = s.material.uniforms;
-      uu.turbidity.value = P.turb + (rainy ? 10 : foggy ? 6 : snowy ? 8 : 0);
-      uu.rayleigh.value = rainy || snowy ? P.ray * 0.4 : P.ray;
+      uu.turbidity.value = P.turb + (rainy ? 10 : foggy ? 6 : snowy ? 8 : over ? 9 : 0);
+      uu.rayleigh.value = rainy || snowy ? P.ray * 0.4 : over ? P.ray * 0.5 : P.ray;
       uu.mieCoefficient.value = P.mie * (rainy || foggy || snowy ? 3 : 1);
       uu.mieDirectionalG.value = P.mieG;
     }
@@ -107,26 +108,28 @@ export function createEnv(renderer, scene) {
     u.sunPosition.value.copy(sunDir); envSky.material.uniforms.sunPosition.value.copy(sunDir);
     lightDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - P.lightElev), th + (time === 'night' ? 1.2 : 0));
     sun.color.set(P.sunColor);
-    sun.intensity = P.sunI * (rainy ? 0.25 : foggy ? 0.45 : snowy ? 0.4 : 1);
+    sun.intensity = P.sunI * (storm ? 0.12 : rainy ? 0.25 : foggy ? 0.45 : snowy ? 0.4 : over ? 0.4 : 1);
     hemi.color.set(P.hemiSky); hemi.groundColor.set(P.hemiGround);
-    hemi.intensity = P.hemiI * (rainy ? 0.85 : snowy ? 1.25 : 1);
-    renderer.toneMappingExposure = P.exposure * (rainy ? 0.85 : 1);
+    hemi.intensity = P.hemiI * (storm ? 0.7 : rainy ? 0.85 : snowy ? 1.25 : over ? 1.15 : 1);
+    renderer.toneMappingExposure = P.exposure * (storm ? 0.72 : rainy ? 0.85 : over ? 0.92 : 1);
     const fc = new THREE.Color(P.fog);
     if (rainy) fc.lerp(new THREE.Color(time === 'night' ? 0x0a0d12 : 0x7d8792), 0.6);
     if (foggy) fc.lerp(new THREE.Color(time === 'night' ? 0x1a1e24 : 0xc4c8cc), 0.75);
     if (snowy) fc.lerp(new THREE.Color(time === 'night' ? 0x1c2230 : 0xdfe5ec), 0.7);
+    if (over) fc.lerp(new THREE.Color(time === 'night' ? 0x12161c : 0xa9b1ba), 0.6);
+    if (storm) fc.lerp(new THREE.Color(0x3a424c), 0.5);
     fogBase.color.copy(fc);
-    fogBase.near = foggy ? 4 : rainy ? 25 : snowy ? 20 : 140; // v32：晴天也有一點淡淡的空氣霧，遠處比較有層次
-    fogBase.far = foggy ? 120 : rainy ? 420 : snowy ? 520 : 1900;
+    fogBase.near = foggy ? 4 : storm ? 12 : rainy ? 25 : snowy ? 20 : over ? 90 : 140; // v32：晴天也有一點淡淡的空氣霧，遠處比較有層次
+    fogBase.far = foggy ? 120 : storm ? 240 : rainy ? 420 : snowy ? 520 : over ? 1200 : 1900;
     const nightish = P.night > 0.7;
     sky.visible = !nightish;
     scene.background = nightish ? fc.clone() : null;
     stars.visible = nightish && !rainy && !foggy && !snowy;
     moon.visible = nightish && !rainy && !foggy && !snowy;
     moon.position.copy(lightDir).multiplyScalar(2400);
-    rain.visible = rainy; snow.visible = snowy;
+    rain.visible = rainy; snow.visible = snowy; rain.material.opacity = storm ? 0.62 : 0.45;
     state.night = Math.min(1, P.night * (rainy || snowy ? 1.2 : 1));
-    state.wet = rainy; state.snow = snowy;
+    state.wet = rainy; state.snow = snowy; state.storm = storm;
     // 反射用環境光：白天、黃昏用實拍天空 HDRI（烤漆、電鍍才有真的雲和光），晚上用程式算的暗天空
     if (regen) {
       if (envRT) envRT.dispose();
@@ -138,7 +141,7 @@ export function createEnv(renderer, scene) {
         scene.environment = envRT.texture;
       }
     }
-    scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1) * (hdrEnv && P.night < 0.7 ? (rainy || foggy || snowy ? 0.6 : 1) * (1 - P.night * 0.9) : 1);
+    scene.environmentIntensity = P.envI * (rainy ? 0.7 : 1) * (hdrEnv && P.night < 0.7 ? (rainy || foggy || snowy ? 0.6 : over ? 0.75 : 1) * (1 - P.night * 0.9) : 1);
     state.hemiBase = hemi.intensity; state.envBase = scene.environmentIntensity;
     if (regen) { for (let i = 0; i < RAIN; i++) resetDrop(i, 0, 0, 0, true); for (let i = 0; i < SNOW; i++) resetFlake(i, 0, 0, 0, true); }
     return state;
@@ -150,11 +153,18 @@ export function createEnv(renderer, scene) {
     sun.target.position.copy(focus);
     const c0 = state.cov || 0;
     state.cov = c0 + ((covered ? 1 : 0) - c0) * Math.min(1, dt * 3);
+    // v37：大雨打雷閃電（每 6～18 秒一次；過一下才聽到雷聲）
+    if (state.storm) {
+      state.boltT = (state.boltT ?? 4) - dt;
+      if (state.boltT <= 0) { state.boltT = 6 + Math.random() * 12; state.flash = 1; state.thunderDelay = 0.3 + Math.random() * 1.8; state.thunderDist = state.thunderDelay / 2.1; }
+      if (state.thunderDelay > 0) { state.thunderDelay -= dt; if (state.thunderDelay <= 0) state.thunder = true; }
+    }
+    state.flash = Math.max(0, (state.flash || 0) - dt * 6);
     if (state.hemiBase !== undefined) {
-      hemi.intensity = state.hemiBase * (1 - 0.75 * state.cov);
+      hemi.intensity = state.hemiBase * (1 - 0.75 * state.cov) + state.flash * 5 * (1 - state.cov);
       scene.environmentIntensity = state.envBase * (1 - 0.75 * state.cov);
     }
-    if (!state.indoor) { rain.visible = state.weather === 'rain' && state.cov < 0.5; snow.visible = state.weather === 'snow' && state.cov < 0.5; }
+    if (!state.indoor) { rain.visible = (state.weather === 'rain' || state.weather === 'storm') && state.cov < 0.5; snow.visible = state.weather === 'snow' && state.cov < 0.5; }
     if (snow.visible) {
       const tt = performance.now() / 1000;
       for (let i = 0; i < SNOW; i++) {
@@ -176,7 +186,7 @@ export function createEnv(renderer, scene) {
   function setIndoor(on) {
     state.indoor = on;
     scene.fog = on ? null : fogBase;
-    rain.visible = !on && state.weather === 'rain'; snow.visible = !on && state.weather === 'snow';
+    rain.visible = !on && (state.weather === 'rain' || state.weather === 'storm'); snow.visible = !on && state.weather === 'snow';
   }
   // 駕駛座：駕駛室裡面不要有雨雪
   function setCabClip(on) { nearClip.value = on ? 3.6 : 0; }

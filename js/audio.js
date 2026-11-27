@@ -122,7 +122,7 @@ export const Snd = {
   resume() { if (this.ctx) this.ctx.resume(); },
 
   // 每一幀更新：rpm、油門、速度、路面、雨、引擎有沒有發動、在車內
-  update({ rpm, throttle, speed, surface, rain, running, inside, retard = false }) {
+  update({ rpm, throttle, speed, surface, rain, running, inside, retard = false, storm = false }) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, k = 0.06;
     const cyc = rpm / 120, fire = cyc * 6; // 一個循環的頻率、點火頻率（6 缸）
@@ -162,7 +162,7 @@ export const Snd = {
     this.gravelN.g.gain.setTargetAtTime(surface !== 'road' ? Math.min(0.08, sp * 0.008) : 0, t, 0.1);
     this.windN.g.gain.setTargetAtTime(Math.min(0.1, sp * sp * 0.00012) * (inside ? 0.5 : 1), t, 0.2);
     this.windN.fl.frequency.setTargetAtTime(500 + sp * 20, t, 0.2);
-    this.rainN.g.gain.setTargetAtTime(rain ? (inside ? 0.09 : 0.06) : 0, t, 0.4);
+    this.rainN.g.gain.setTargetAtTime(rain ? (inside ? 0.09 : 0.06) * (storm ? 1.9 : 1) : 0, t, 0.4);
     this.lastBoost = boost;
   },
 
@@ -183,6 +183,12 @@ export const Snd = {
     let node = o;
     if (filter) { const fl = this.ctx.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = filter; o.connect(fl); node = fl; }
     node.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
+  },
+  // v37：雨刷刷過擋風玻璃（車內聽得比較清楚）、打雷
+  wiper(inside) { this.burst(0.32, 'bandpass', 1500, inside ? 0.05 : 0.018, 0, 0.9); this.burst(0.1, 'lowpass', 260, inside ? 0.06 : 0.02, 0.28); },
+  thunder(dist = 0.5) {
+    const v = 0.5 * (1 - Math.min(0.8, dist * 0.6));
+    this.burst(0.25, 'lowpass', 900, v * 0.6); this.burst(3.2, 'lowpass', 140, v, 0.05, 0.6); this.burst(2.2, 'lowpass', 320, v * 0.5, 0.25); this.tone(48, 2.4, 'sine', v * 0.5, 0.05, 30);
   },
   airBrake() { this.burst(0.7, 'highpass', 2500, 0.22); this.burst(0.25, 'bandpass', 900, 0.15); },
   blowOff() { this.burst(0.45, 'bandpass', 2600, 0.06 + (this.lastBoost || 0) * 0.14, 0, 1.2); this.burst(0.2, 'highpass', 5000, 0.04 + (this.lastBoost || 0) * 0.05); this.spool = (this.spool || 0) * 0.4; },

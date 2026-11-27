@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v36';
+const VERSION = 'v37';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -25,6 +25,7 @@ const DEFAULT_TRUCK = {
   rims: 'std', bumper: 'std', lightbar: 'off', stacks: 'off', visor: 'off', spoiler: 'off',
   horn: 'normal', glow: 'off',
   tires: 'std', brakes: 'std', suspension: 'std', chassis: 'std', skirts: 'off', tanks: 'alu', interior: 'black', ambient: 'off', headlight: 'white',
+  engine: 'e450', gbx: 'g12', sidelights: 'off', cabacc: 'none',
   trailerColor: '#e9ecef', trailerColor2: '#9aa7b4', trailerGradient: 'off', trailerPattern: 'none', trailerPatColor: '#1d3557', name: '我的卡車',
   cabDecalData: '', cabDecalX: 0, cabDecalY: 0, cabDecalScale: 0.34, cabDecalRotation: 0,
   trailerDecalData: '', trailerDecalX: 0, trailerDecalY: 0, trailerDecalScale: 0.42, trailerDecalRotation: 0,
@@ -112,6 +113,28 @@ const CATALOG = {
     { id: 'warm', name: '黃光', icon: '🟡', price: 60 },
     { id: 'blue', name: '冰藍光', icon: '🔵', price: 120 },
   ] },
+  // v37：引擎、變速箱（真的會影響開車）
+  engine: { title: '引擎', items: [
+    { id: 'e450', name: '原廠 450 匹', icon: '⚙️', price: 0 },
+    { id: 'e550', name: '強化 550 匹（爬坡有力）', icon: '🔥', price: 900 },
+    { id: 'e650', name: '旗艦 650 匹（最快、最有力）', icon: '🚀', price: 2200 },
+  ] },
+  gbx: { title: '變速箱', items: [
+    { id: 'g12', name: '12 速', icon: '🕹️', price: 0 },
+    { id: 'g14', name: '14 速超速檔（高速省油、轉速低）', icon: '⚡', price: 700 },
+  ] },
+  sidelights: { title: '車側燈（晚上會亮）', items: [
+    { id: 'off', name: '不裝', icon: '✖️', price: 0 },
+    { id: 'amber', name: '琥珀色 LED', icon: '🟠', price: 150 },
+    { id: 'white', name: '白色 LED', icon: '⚪', price: 150 },
+    { id: 'blue', name: '藍色 LED', icon: '🔵', price: 180 },
+  ] },
+  cabacc: { title: '駕駛室配件', items: [
+    { id: 'none', name: '不裝', icon: '✖️', price: 0 },
+    { id: 'toy', name: '儀表板小卡車模型', icon: '🚚', price: 80 },
+    { id: 'charm', name: '後照鏡吊飾＋香氛', icon: '🌲', price: 60 },
+    { id: 'curtain', name: '臥鋪窗簾＋小冰箱', icon: '🛏️', price: 200 },
+  ] },
   // v26：內裝（駕駛座視角看得到）
   interior: { title: '座艙內裝', items: [
     { id: 'black', name: '黑色', icon: '⬛', price: 0 },
@@ -136,7 +159,7 @@ const catList = (cat) => CATALOG[cat === 'trailerPattern' ? 'pattern' : cat].ite
 const ownKey = (cat, id) => (cat === 'trailerPattern' ? 'pattern' : cat) + ':' + id;
 const itemOf = (cat, id) => catList(cat).find((i) => i.id === id);
 function isOwned(cat, id) { const it = itemOf(cat, id); return !!it && (it.price === 0 || save.owned.includes(ownKey(cat, id))); }
-const ITEM_KEYS = ['cabStyle', 'trailerType', 'paint', 'pattern', 'bumper', 'rims', 'stacks', 'lightbar', 'visor', 'spoiler', 'horn', 'glow', 'trailerPattern', 'tires', 'brakes', 'suspension', 'chassis', 'skirts', 'tanks', 'headlight', 'interior', 'ambient'];
+const ITEM_KEYS = ['cabStyle', 'trailerType', 'paint', 'pattern', 'bumper', 'rims', 'stacks', 'lightbar', 'visor', 'spoiler', 'horn', 'glow', 'trailerPattern', 'tires', 'brakes', 'suspension', 'chassis', 'skirts', 'tanks', 'headlight', 'interior', 'ambient', 'engine', 'gbx', 'sidelights', 'cabacc'];
 const COLOR_KEYS = ['cabColor', 'cabColor2', 'patternColor', 'trailerColor', 'trailerColor2', 'trailerPatColor'];
 const PALETTE = ['#b71c1c', '#e65100', '#f9a825', '#2e7d32', '#00695c', '#0277bd', '#1a237e', '#4a148c',
   '#ad1457', '#f5f5f5', '#9e9e9e', '#37474f', '#111111', '#5d4037', '#c0a062', '#00e5ff'];
@@ -183,8 +206,8 @@ function loadSave() {
       for (const k of ['cabDecalRotation','trailerDecalRotation']) if (Number.isFinite(s.truck[k])) out.truck[k] = clamp(s.truck[k], -180, 180);
     }
     if (s.settings && typeof s.settings === 'object') {
-      if (['day', 'dusk', 'night', 'auto'].includes(s.settings.time)) out.settings.time = s.settings.time;
-      if (['clear', 'rain', 'fog', 'snow'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
+      if (['day', 'dusk', 'night', 'dawn', 'auto'].includes(s.settings.time)) out.settings.time = s.settings.time;
+      if (['clear', 'overcast', 'rain', 'storm', 'fog', 'snow'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
       if (['high', 'mid', 'low'].includes(s.settings.quality)) out.settings.quality = s.settings.quality;
       if (typeof s.settings.glb === 'boolean') out.settings.glb = s.settings.glb;
       if (typeof s.settings.music === 'boolean') out.settings.music = s.settings.music;
@@ -282,6 +305,7 @@ let rig = null;
 function rebuildRig(cfg) {
   if (rig) rig.dispose();
   S.builtTrailer = inGarage() ? cfg.trailerType : curTrailer();
+  GEARS = save.truck.gbx === 'g14' ? GEARS14 : GEARS12; if (S.gear > GEARS.length) S.gear = GEARS.length;
   rig = buildRig(inGarage() ? cfg : { ...cfg, trailerType: curTrailer() }, save.dirt); // v36：開車時拖的是任務的拖車
   S.rigCfg = JSON.stringify(cfg);
   scene.add(rig.tractor, rig.trailer);
@@ -702,9 +726,10 @@ $('#coins').addEventListener('click', () => {
 });
 
 // ---- 環境（時間、天氣、畫質） ----
-const TIME_N = { day: '☀️ 白天', dusk: '🌇 黃昏', night: '🌙 晚上', auto: '🔄 自動日夜' }, WEATHER_N = { clear: '🌤 晴天', rain: '🌧 下雨', fog: '🌫 起霧', snow: '❄️ 下雪' };
+const TIME_N = { dawn: '🌅 日出', day: '☀️ 白天', dusk: '🌇 黃昏', night: '🌙 晚上', auto: '🔄 自動日夜' }, WEATHER_N = { clear: '🌤 晴天', overcast: '☁️ 陰天', rain: '🌧 下雨', storm: '⛈ 大雨', fog: '🌫 濃霧', snow: '❄️ 下雪' };
+const rainyW = (w) => w === 'rain' || w === 'storm';
 // v30：自動日夜循環（12 分鐘一輪：白天 → 黃昏 → 晚上 → 清晨 → 白天，中間慢慢過渡）
-const DAY_CYCLE = [['day', 300], ['day>dusk', 30], ['dusk', 30], ['dusk>night', 30], ['night', 240], ['night>dusk', 30], ['dusk', 30], ['dusk>day', 30]];
+const DAY_CYCLE = [['day', 300], ['day>dusk', 30], ['dusk', 30], ['dusk>night', 30], ['night', 240], ['night>dawn', 30], ['dawn', 30], ['dawn>day', 30]]; // v37：早上是日出（東邊、粉橘色）
 const DAY_LEN = DAY_CYCLE.reduce((a, b) => a + b[1], 0);
 let dayT = 0, dayKey = '', dayMixT = 0;
 function dayPhase() {
@@ -728,12 +753,12 @@ function effectiveTime() { if (save.settings.time !== 'auto') return save.settin
 function applyEnv() {
   const st = env.apply(effectiveTime(), save.settings.weather);
   setNight(st.night); setWet(st.wet); setSnow(st.snow ? 1 : 0);
-  if (!S.lightsManual) S.lights = st.night > 0.3 || save.settings.weather !== 'clear';
-  S.wipers = save.settings.weather === 'rain' || save.settings.weather === 'snow';
+  if (!S.lightsManual) S.lights = st.night > 0.3 || !['clear', 'overcast'].includes(save.settings.weather);
+  S.wipers = rainyW(save.settings.weather) || save.settings.weather === 'snow';
   refreshButtons();
 }
 function cycleEnv(kind) {
-  const list = kind === 'time' ? ['day', 'dusk', 'night', 'auto'] : ['clear', 'rain', 'fog', 'snow'];
+  const list = kind === 'time' ? ['dawn', 'day', 'dusk', 'night', 'auto'] : ['clear', 'overcast', 'rain', 'storm', 'fog', 'snow'];
   save.settings[kind] = list[(list.indexOf(save.settings[kind]) + 1) % list.length];
   S.lightsManual = false; persist(); applyEnv(); renderEnvPanel();
   toast(kind === 'time' ? TIME_N[save.settings.time] : WEATHER_N[save.settings.weather], 1000);
@@ -846,12 +871,12 @@ function renderGarage() {
     </div>
     <div class="studio-note">圖片會縮圖後保存在本機存檔。可在預覽區直接拖曳圖案定位，也可用滑桿微調；車頭與拖車各自獨立儲存。</div>`;
   else if (S.gTab === 'pattern') h = secHtml('彩繪圖案') + cardsHtml('pattern') + secHtml('彩繪顏色（免費換）') + swatchHtml('patternColor');
-  else if (S.gTab === 'parts') h = ['bumper', 'rims', 'chassis', 'skirts', 'tanks', 'stacks', 'lightbar', 'headlight', 'visor', 'spoiler'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
-  else if (S.gTab === 'perf') h = `<div class="studio-note">這些零件會真的改變開車的感覺：輪胎影響轉彎和雨天打滑、煞車影響煞車距離和過熱、懸吊影響晃動和側傾。</div>` + ['tires', 'brakes', 'suspension'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('') + secHtml('引擎、油耗升級') + '<div class="studio-note">引擎動力和節能升級在「🏢 物流經營」分頁。</div>';
-  else if (S.gTab === 'cabin') h = `<div class="studio-note">內裝在駕駛座視角（📷 鏡頭 →「駕駛座」）看得到。</div>` + ['interior', 'ambient'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
+  else if (S.gTab === 'parts') h = ['bumper', 'rims', 'chassis', 'skirts', 'tanks', 'stacks', 'lightbar', 'sidelights', 'headlight', 'visor', 'spoiler'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
+  else if (S.gTab === 'perf') h = `<div class="studio-note">這些零件會真的改變開車的感覺：輪胎影響轉彎和雨天打滑、煞車影響煞車距離和過熱、懸吊影響晃動和側傾。</div>` + ['engine', 'gbx', 'tires', 'brakes', 'suspension'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('') + '<div class="studio-note">公司的引擎調校、節能升級在「🏢 物流經營」分頁（全車隊都有效）。</div>';
+  else if (S.gTab === 'cabin') h = `<div class="studio-note">內裝在駕駛座視角（📷 鏡頭 →「駕駛座」）看得到。</div>` + ['interior', 'ambient', 'cabacc'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
   else if (S.gTab === 'fun') h = ['horn', 'glow'].map((c) => secHtml(CATALOG[c].title) + cardsHtml(c)).join('');
   else if (S.gTab === 'trailer') {
-    h = secHtml('拖車顏色（免費換）') + swatchHtml('trailerColor') + secHtml('拖車彩繪（買過的圖案都能用）') + cardsHtml('trailerPattern')
+    h = '<div class="studio-note">送貨時的拖車種類由訂單決定（廂型／平板／砂石斗），這裡的顏色和彩繪會用在你接的每一台拖車上。</div>' + secHtml('拖車顏色（免費換）') + swatchHtml('trailerColor') + secHtml('拖車彩繪（買過的圖案都能用）') + cardsHtml('trailerPattern')
       + secHtml('拖車彩繪顏色（免費換）') + swatchHtml('trailerPatColor')
       + secHtml('寫在拖車上的名字（最多 8 個字）') + `<input class="name-in" id="nameIn" maxlength="8" value="${escapeHtml(draft.name)}" placeholder="例如：小明號">`;
   }
@@ -1120,7 +1145,9 @@ function buyPending() {
 }
 
 // ================= 重車物理 =================
-const GEARS = [14.9, 11.7, 9.1, 7.1, 5.6, 4.4, 3.4, 2.7, 2.1, 1.6, 1.28, 1.0], FINAL = 2.85, EFF = 0.88, RW = 0.53, R_GEAR = 13;
+const GEARS12 = [14.9, 11.7, 9.1, 7.1, 5.6, 4.4, 3.4, 2.7, 2.1, 1.6, 1.28, 1.0], GEARS14 = [...GEARS12, 0.86, 0.74], FINAL = 2.85, EFF = 0.88, RW = 0.53, R_GEAR = 13;
+let GEARS = GEARS12; // v37：14 速多兩個超速檔
+const ENGINE_MUL = { e450: 1, e550: 1.18, e650: 1.36 };
 const L = 3.8, LT = 10.7, VMAX = 33; // v32：最高約 120 公里（真實聯結車國道約 90～110）
 function torque(rpm) {
   if (rpm < 1000) return 1700 + (rpm - 600) * 2;
@@ -1195,7 +1222,7 @@ function drive(dt) {
     if (Math.abs(S.v) < 0.5 && S.gear > 2 && accelPedal > 0) { S.gear = 1; Snd.shift(); } // 手排停下來忘記降檔：自動退到 1 檔（不會熄火）
   }
   else if (!rev) {
-    if (S.rpm > 1750 && S.gear < 12) { S.gear++; S.shiftT = 0.4; Snd.shift(); if (S.thr > 0.5) Snd.blowOff(); }
+    if (S.rpm > 1750 && S.gear < GEARS.length) { S.gear++; S.shiftT = 0.4; Snd.shift(); if (S.thr > 0.5) Snd.blowOff(); }
     else if (S.rpm < 1050 && S.gear > 1 && Math.abs(S.v) > 1) { S.gear--; S.shiftT = 0.3; Snd.shift(); }
     else if (Math.abs(S.v) < 1 && S.gear > 1) S.gear = 1;
   }
@@ -1207,8 +1234,9 @@ function drive(dt) {
   if (S.handbrake && accelPedal > 0.3) S.hint = '🅿 手煞車還拉著！按空白鍵（平板按 🅿）放開';
   else if (springBrake) S.hint = '⚠️ 氣壓太低，煞車自己鎖住了：停著等氣壓回來';
   else if (save.settings.gearbox === 'manual' && !rev && S.rpm > 1950 && accelPedal > 0.3 && S.gear < GEARS.length) S.hint = '轉速太高了，按 Shift（＋）升檔';
+  else if (save.settings.gearbox === 'manual' && !rev && S.rpm < 800 && accelPedal > 0.3 && S.gear > 1 && Math.abs(S.v) > 0.5) S.hint = '轉速太低沒力氣，按 Ctrl（－）降檔';
   if (S.shiftT <= 0 && accelPedal > 0 && !S.handbrake && !springBrake) {
-    F = accelPedal * torque(S.rpm) * (1 + save.company.engineLevel * 0.08) * ratio * FINAL * EFF / RW * power;
+    F = accelPedal * torque(S.rpm) * (1 + save.company.engineLevel * 0.08) * (ENGINE_MUL[save.truck.engine] || 1) * ratio * FINAL * EFF / RW * power;
     F = Math.min(F, 2.6 * mass * grip); // 抓地力上限
     if (!rev && S.v > VMAX + save.company.engineLevel * 0.7) F = 0;
     if (rev && S.v < -4) F = 0;
@@ -1337,7 +1365,7 @@ function drive(dt) {
   // 方向燈自動回正
   if ((S.ind === 'L' || S.ind === 'R') && Math.abs(S.steer) > 0.25) S.indArmed = true;
   if (S.indArmed && Math.abs(S.steer) < 0.05) { S.ind = null; S.indArmed = false; refreshButtons(); }
-  Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel, inside: S.cam === 2, retard: S.retarder });
+  Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel, inside: S.cam === 2, retard: S.retarder, storm: env.state.weather === 'storm' });
 }
 
 // 紅綠燈：前面紅燈會提醒；紅燈還開過路口就跳「闖紅燈」
@@ -1592,7 +1620,7 @@ function renderMirrors() {
 const wsCv = document.createElement('canvas'); wsCv.id = 'windshieldDrops'; document.body.appendChild(wsCv);
 const wsCtx = wsCv.getContext('2d'); const drops = []; let wsWipe = 0;
 function drawWindshield(dt) {
-  const on = document.body.classList.contains('cab-view') && (save.settings.weather === 'rain' || save.settings.weather === 'snow') && !S.tunNear;
+  const on = document.body.classList.contains('cab-view') && (rainyW(save.settings.weather) || save.settings.weather === 'snow') && !S.tunNear;
   wsCv.style.display = on ? 'block' : 'none';
   if (!on) { drops.length = 0; return; }
   const W = window.innerWidth, H = window.innerHeight;
@@ -1651,7 +1679,9 @@ function frame(dt) {
   for (const w of rig.trailerSpins) w.rotation.x = S.wheelAngle;
   for (const f of rig.front) f.rotation.y = S.steer;
   rig.steeringWheel.rotation.z = -S.steer * 7;
-  if (S.wipers) S.wiperT += dt * 2.6;
+  if (S.wipers) S.wiperT += dt * (env.state.weather === 'storm' ? 3.6 : 2.6); // 大雨刷快一點
+  if (S.wipers && S.mode === 'drive') { const ph = Math.floor(S.wiperT / Math.PI); if (ph !== S.wiperPh) { S.wiperPh = ph; Snd.wiper(S.cam === 2); } } // v37：雨刷刷過去的聲音
+  if (env.state.thunder) { env.state.thunder = false; if (S.mode !== 'title') Snd.thunder(env.state.thunderDist || 0.5); }
   const wa = S.wipers ? (1 - Math.cos(S.wiperT)) * 0.85 : Math.max(0, rig.wipers[0].rotation.z * -1 - dt * 3) ;
   rig.wipers.forEach((w) => (w.rotation.z = -wa));
   // 方向燈閃爍
@@ -1661,7 +1691,7 @@ function frame(dt) {
   const lightsOn = S.lights && !inGarage();
   rig.spots.forEach((s) => (s.intensity = lightsOn ? 900 : 0));
   // v32：大燈光錐＋照在路面上的光斑（越暗越明顯；下雨霧天光錐更清楚）
-  const beamK = lightsOn ? clamp(env.state.night * 1.1 + (env.state.weather === 'fog' || env.state.weather === 'rain' ? 0.25 : 0), 0, 1) : 0;
+  const beamK = lightsOn ? clamp(env.state.night * 1.1 + (env.state.weather === 'fog' || rainyW(env.state.weather) ? 0.25 : 0), 0, 1) : 0;
   for (const b of rig.beams) { b.visible = beamK > 0.02; b.material.opacity = b.userData.base * beamK; }
   if (rig.chameleon) { const c = new THREE.Color().setHSL((S.time * 0.08) % 1, 0.85, 0.5); rig.paint.color.copy(c); rig.paintPlain.color.copy(c); if (rig.rimMat) rig.rimMat.color.copy(c); }
   if (rig.rainbowGlow) { const c = new THREE.Color().setHSL((S.time * 0.5) % 1, 1, 0.55); rig.glowMat.color.copy(c); rig.glowLight.color.copy(c); }
@@ -1751,7 +1781,7 @@ const TUT = [
   { t: '按住 ↑（平板按右下「油門」）往前開', ok: () => S.v > 3 },
   { t: '按 ← →（平板按「方向盤」）轉個彎', ok: () => (S.tutTurn || 0) > 1.2 },
   { t: '按 ↓（平板按「煞車」）把車停下來', ok: () => S.tutMoved && Math.abs(S.v) < 0.3 },
-  { t: '跟著小地圖上的橘色導航線，開到黃色裝卸區停好，就會自動裝貨', ok: () => S.mission && S.mission.stage === 'deliver', sub: '上面的箭頭也會告訴你往哪轉' },
+  { t: '跟著橘色導航線開到裝貨區，車頭對齊拖車、慢慢倒車到拖車前面，按 F（平板按 🔗）接上拖車', ok: () => S.mission && S.mission.stage === 'deliver', sub: '上面會告訴你還差幾公尺' },
   { t: '裝好了！現在把貨送到目的地，停進黃色框就會卸貨', ok: () => save.deliveries > (S.tutStartDel ?? 0), sub: '轉彎和下坡要慢慢開，貨物才不會壞' },
 ];
 function startTutorial() { S.tut = 0; S.tutTurn = 0; S.tutMoved = false; S.tutStartDel = save.deliveries; save.flags = save.flags || {}; save.flags.tutSeen = true; persist(); showTut(); }
@@ -1828,7 +1858,7 @@ function renderMenu() {
       <div><kbd>Q</kbd><kbd>E</kbd> 方向燈　<kbd>X</kbd> 警示燈　<kbd>L</kbd> 大燈　<kbd>K</kbd> 雨刷　<kbd>H</kbd> 喇叭　<kbd>J</kbd> 排氣煞車</div>
       <div><kbd>C</kbd> 換鏡頭　<kbd>滑鼠拖曳</kbd> 轉頭看　<kbd>滾輪</kbd> 鏡頭遠近　<kbd>M</kbd> 世界地圖　<kbd>Esc</kbd> 遊戲選單</div>
       <div><kbd>T</kbd> 換時間　<kbd>Y</kbd> 換天氣　<kbd>G</kbd> 改裝廠　<kbd>N</kbd> 聲音　<kbd>Backspace</kbd> 回廠</div>
-      <div class="tip">平板手機用畫面上的按鈕。跟著橘色導航線開，停進黃色裝卸區就會自動裝貨、卸貨。按「📋 接單」挑想送的貨。</div></div>
+      <div class="tip">平板手機用畫面上的按鈕。按「📋 接單」到貨運市場挑貨物 → 開到裝貨區倒車接拖車（F）→ 跟著橘色導航線送到卸貨區停好就會自動卸貨。</div></div>
       <button class="big-act gold" data-act="tutorial">🎓 重新開始新手教學</button>`;
   }
   $('#menuBody').innerHTML = h;

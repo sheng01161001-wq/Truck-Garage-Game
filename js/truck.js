@@ -35,6 +35,7 @@ function mats() {
     indL: new THREE.MeshStandardMaterial({ color: 0x6a3a00, emissive: 0xff9000, emissiveIntensity: 0.05, roughness: 0.2 }),
     indR: new THREE.MeshStandardMaterial({ color: 0x6a3a00, emissive: 0xff9000, emissiveIntensity: 0.05, roughness: 0.2 }),
     marker: new THREE.MeshStandardMaterial({ color: 0x7a4a00, emissive: 0xffa020, emissiveIntensity: 0.3 }),
+    side: new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0xffa020, emissiveIntensity: 0.4 }), // v37：車側燈（顏色依改裝）
     reverse: new THREE.MeshStandardMaterial({ color: 0xbbbbbb, emissive: 0xffffff, emissiveIntensity: 0 }),
     bar: new THREE.MeshStandardMaterial({ color: 0xdde6ee, emissive: 0xffffff, emissiveIntensity: 0.05 }),
     cluster: new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0x39b6ff, emissiveIntensity: 0.9 }),
@@ -103,6 +104,7 @@ export function setTruckLights(s) {
   m.reverse.emissiveIntensity = s.reverse ? 4 : 0;
   m.bar.emissiveIntensity = s.head ? 8 : 0.05;
   m.marker.emissiveIntensity = s.head ? 3 : 0.3;
+  m.side.emissiveIntensity = s.head ? 4 : 0.4;
 }
 
 // ---------- 共用幾何（輪胎、鋼圈） ----------
@@ -389,6 +391,20 @@ export function buildRig(cfg, dirt = 0) {
     }
     // 車頂內襯
     part(C, box(cabW - 0.1, 0.04, 1.6), leather, 0, top + 1.08, cz - 0.7);
+    // v37：駕駛室配件
+    if (cfg.cabacc === 'toy') { // 儀表板上的小卡車模型
+      const tm = new THREE.MeshStandardMaterial({ color: base, roughness: 0.4, metalness: 0.3 }); own.push(tm);
+      part(C, box(0.09, 0.08, 0.1), tm, midX - (cx > 0 ? 0.25 : -0.25), top + 0.04, cz - 0.02);
+      part(C, box(0.08, 0.07, 0.2), m.alu, midX - (cx > 0 ? 0.25 : -0.25), top + 0.035, cz - 0.17);
+    } else if (cfg.cabacc === 'charm') { // 後照鏡吊飾（小松樹香氛）
+      const gm = new THREE.MeshStandardMaterial({ color: 0x1f8a3c, roughness: 0.7 }); own.push(gm);
+      part(C, cyl(0.003, 0.003, 0.22, 4), m.black, cx * 0.3, top + 0.85, cz + 0.05);
+      part(C, (() => { const cg = new THREE.ConeGeometry(0.05, 0.12, 6); geos.push(cg); return cg; })(), gm, cx * 0.3, top + 0.69, cz + 0.05);
+    } else if (cfg.cabacc === 'curtain') { // 臥鋪窗簾＋小冰箱
+      const cm = new THREE.MeshStandardMaterial({ color: 0x5b2c2c, roughness: 0.95, side: THREE.DoubleSide }); own.push(cm);
+      for (let i = 0; i < 7; i++) part(C, box((cabW - 0.2) / 7, 1.0, 0.03), cm, -cabW / 2 + 0.1 + (i + 0.5) * (cabW - 0.2) / 7, top + 0.45, cz - 1.25 + (i % 2) * 0.04);
+      part(C, rbox(0.42, 0.45, 0.4, 0.04), m.steel, midX, top - 0.7, cz - 0.95);
+    }
   };
   const wheel = (parent, x, z, { dual = false, wide = false } = {}) => {
     const g = new THREE.Group(); g.position.set(x, WHEEL_R, z); parent.add(g);
@@ -651,6 +667,13 @@ export function buildRig(cfg, dirt = 0) {
   const pool = new THREE.Mesh(pg, beamMat(0.45, poolTex)); pool.userData.base = 0.45;
   pool.position.set(0, 0.06, hz + 13); pool.renderOrder = 2; pool.visible = false; tractor.add(pool); beams.push(pool);
 
+  // v37：車側燈（車頭、拖車側邊下緣一排 LED）
+  const SIDE_COL = { amber: 0xffa020, white: 0xf2f6ff, blue: 0x3aa0ff }[cfg.sidelights];
+  if (SIDE_COL) {
+    m.side.emissive.set(SIDE_COL);
+    const lb = box(0.03, 0.05, 0.12);
+    for (const sx of [1, -1]) for (let i = 0; i < 4; i++) part(tractor, lb, m.side, sx * (US ? 1.22 : 1.27), US ? 1.35 : 1.42, (US ? 1.9 : 3.3) + i * 0.55).castShadow = false;
+  }
   // 前輪、後輪（雙輪）
   for (const sx of [1, -1]) {
     front.push(wheel(tractor, sx * 1.05, 3.8));
@@ -696,6 +719,7 @@ export function buildRig(cfg, dirt = 0) {
     part(trailer, box(0.13, 0.16, 0.03), sx > 0 ? m.indL : m.indR, sx * 0.7, 1.0, -13.0);
     part(trailer, box(0.11, 0.16, 0.03), m.reverse, sx * 0.57, 1.0, -13.0);
     for (let i = 0; i < 5; i++) part(trailer, box(0.03, 0.06, 0.1), m.marker, sx * 1.22, 1.35, -1.5 - i * 2.6);
+    if (SIDE_COL) for (let i = 0; i < 12; i++) part(trailer, box(0.03, 0.05, 0.14), m.side, sx * 1.29, 1.26, -0.6 - i * 1.0).castShadow = false; // 拖車車側燈
   }
   part(trailer, box(2.3, 0.14, 0.12), m.icc, 0, 0.6, -12.95);
   part(trailer, box(0.52, 0.13, 0.02), plateMat, 0, 0.82, -12.98);

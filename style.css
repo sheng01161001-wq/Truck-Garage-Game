@@ -319,3 +319,18 @@ body.cab-view #cluster, body.cab-view #minimap { opacity: 0; pointer-events: non
 .fleet-custom-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.fleet-custom-row label{display:grid;gap:5px;color:#aebbc7;font-size:11px}.fleet-custom-row select,.fleet-custom-row input{width:100%;min-width:0;padding:8px 9px;border:1px solid #435565;border-radius:8px;background:#101a23;color:#f2f5f8;font-size:12px}.fleet-custom-row select{cursor:pointer}.dispatch-top>span{max-width:52%;text-align:right}@media(max-width:560px){.fleet-custom-row{grid-template-columns:1fr}}
 /* v31：上方按鈕變多了，螢幕窄的時候只留圖示，不要壓到任務欄 */
 @media (max-width: 1100px) { .top-right .tbtn span { display: none; } .top-right .tbtn { width: 46px; height: 46px; font-size: 20px; } }
+
+/* v37：手機直立：踏板最下面 → 儀表在踏板上面 → 功能按鈕再上面；上方按鈕縮小、任務框在左、小地圖在右 */
+@media (max-width: 520px) and (orientation: portrait) {
+  body.touch .top-right { left: 6px; right: 6px; top: 6px; justify-content: flex-end; flex-wrap: wrap; gap: 3px; }
+  body.touch .tbtn { width: 38px; height: 38px; font-size: 17px; }
+  body.touch .top-left { top: 166px; right: 6px; left: auto; }
+  body.touch .tbtn span { display: none; }
+  body.touch #mission { left: 6px; right: 116px; top: 56px; transform: none; max-width: none; }
+  body.touch #minimap { top: 56px; right: 6px; width: 104px; height: 104px; }
+  body.touch #cluster { bottom: 112px; width: 250px; right: 50%; transform: translateX(50%); }
+  body.touch #controls { bottom: 228px; left: 6px; right: 6px; max-width: none; gap: 4px; }
+  body.touch #controls .cbtn { width: 42px; height: 42px; font-size: 15px; }
+  body.touch #controls .cbtn span { font-size: 9px; }
+  .tc { width: 70px; height: 70px; } .tc.gas { height: 92px; }
+}
