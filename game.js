@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v34';
+const VERSION = 'v35';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -169,6 +169,7 @@ function loadSave() {
     if (s.jobs && typeof s.jobs === 'object') out.jobs = { done: Math.max(0, Math.floor(Number(s.jobs.done) || 0)), stars: Math.max(0, Math.floor(Number(s.jobs.stars) || 0)) }; // v28 任務評價紀錄
     for (const k of ['fuel', 'damage', 'dirt']) if (Number.isFinite(s[k])) out[k] = clamp(s[k], 0, 1);
     if (Number.isFinite(s.odo)) out.odo = Math.max(0, s.odo);
+    if (Array.isArray(s.ledger)) out.ledger = s.ledger.filter((e) => e && Number.isFinite(e.v) && typeof e.cat === 'string').slice(0, 200).map((e) => ({ t: Number(e.t) || 0, cat: e.cat.slice(0, 12), note: String(e.note || '').slice(0, 40), v: Math.round(e.v) }));
     if (s.truck && typeof s.truck === 'object') {
       for (const k of COLOR_KEYS) if (/^#[0-9a-f]{6}$/i.test(s.truck[k])) out.truck[k] = s.truck[k];
       if (typeof s.truck.name === 'string') out.truck.name = s.truck.name.slice(0, 8);
@@ -221,6 +222,14 @@ function logFleetEvent(message) { save.company.fleetLog.unshift({ time: Date.now
 while (save.company.fleetUnits.length < Math.max(0, save.company.trucks - 1)) save.company.fleetUnits.push(createFleetUnit(save.company.fleetUnits.length));
 save.company.fleetUnits = save.company.fleetUnits.slice(0, Math.max(0, save.company.trucks - 1));
 for (const k of ITEM_KEYS) if (!isOwned(k, save.truck[k])) save.truck[k] = DEFAULT_TRUCK[k];
+// v35：收支帳本（每一筆收入、支出都記下來，最多 200 筆）
+function money(amount, cat, note = '') {
+  amount = Math.round(amount); if (!amount) return;
+  if (amount < 0) amount = -Math.min(save.coins, -amount); // 錢不夠就扣到 0
+  save.coins += amount;
+  save.ledger = [{ t: Date.now(), cat, note, v: amount }, ...(save.ledger || [])].slice(0, 200);
+  if (typeof updateCoins === 'function' && document.getElementById('coinNum')) updateCoins();
+}
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); return true; } catch (e) { return false; } }
 let draft = { ...save.truck };
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1184,7 +1193,7 @@ function drive(dt) {
       save.damage = clamp(save.damage + dmg, 0, 1); S.bumpsThisJob++;
       Snd.thud(clamp(impact / 12, 0.3, 1)); S.shake = Math.min(1.2, impact / 10);
       toast(hit.car ? `撞到車了！車損 +${Math.round(dmg * 100)}%` : `碰撞！車損 +${Math.round(dmg * 100)}%`, 1300);
-      if (hit.car && impact > 4) traffic.crash(hit.car, 25); // 被撞的車停在路邊閃故障燈
+      if (hit.car && impact > 4) { traffic.crash(hit.car, 25); const pay = Math.round(impact * 15); money(-pay, '賠償', '撞到別的車'); persist(); setTimeout(() => toast(`💥 肇事賠償 ${pay} 金幣`, 1800), 1300); } // 被撞的車停在路邊閃故障燈
       if (S.mission && S.mission.stage === 'deliver') S.mission.cargoDmg = Math.min(1, S.mission.cargoDmg + impact * 0.012 * (S.mission.fragile ? 2.2 : 1)); // 貨物也會撞壞
     }
     S.v = -S.v * 0.2;
@@ -1261,7 +1270,7 @@ function redLightCheck() {
   const ds = (next - along) * d, st = lightState(S.time, axis);
   if (st === 'r' && ds > 8 && ds < 45 && !S.hint && Math.abs(S.v) > 1) S.hint = '🚦 前面紅燈，請停在路口前';
   const inside = ds < 7 && ds > -7, key = cx + ',' + cz;
-  if (inside && S.rlCross !== key) { S.rlCross = key; if (st === 'r' && Math.abs(S.v) > 3) { toast('🚦 闖紅燈了！要等綠燈喔', 1800); Snd.no(); if (S.mission) S.mission.redLights = (S.mission.redLights || 0) + 1; } }
+  if (inside && S.rlCross !== key) { S.rlCross = key; if (st === 'r' && Math.abs(S.v) > 3) { money(-200, '罰款', '闖紅燈'); persist(); toast('🚦 闖紅燈！罰款 200 金幣，要等綠燈喔', 2200); Snd.no(); if (S.mission) S.mission.redLights = (S.mission.redLights || 0) + 1; } }
   if (!inside && S.rlCross === key && ds < -7) S.rlCross = null;
 }
 

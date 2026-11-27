@@ -44,6 +44,21 @@ function shared() {
   g.lorryBox = new THREE.BoxGeometry(2.3, 2.6, 6.2);
   g.lorryWin = new THREE.BoxGeometry(2.0, 0.8, 0.05);
   SH.box = new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.6, metalness: 0.1 });
+  // v35：市區公車、國道聯結車
+  g.busBody = new RoundedBoxGeometry(2.5, 2.9, 11.6, 3, 0.18);
+  g.busWin = new THREE.BoxGeometry(2.54, 1.0, 10.2);
+  g.busFront = new THREE.BoxGeometry(2.2, 1.5, 0.05);
+  g.busSign = new THREE.BoxGeometry(1.6, 0.28, 0.06);
+  g.semiCab = new RoundedBoxGeometry(2.5, 3.0, 2.3, 3, 0.16);
+  g.semiRoof = new RoundedBoxGeometry(2.4, 0.6, 2.1, 3, 0.2);
+  g.semiWin = new THREE.BoxGeometry(2.2, 1.0, 0.05);
+  g.semiBox = new RoundedBoxGeometry(2.55, 2.9, 12.4, 2, 0.05);
+  g.semiChassis = new THREE.BoxGeometry(1.0, 0.35, 15.4);
+  g.semiGrille = new THREE.BoxGeometry(1.8, 0.9, 0.05);
+  SH.busPaint = [0x1f8a4c, 0x1e5fa8, 0xd7a21f, 0xc8352e].map((c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.32, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08 }));
+  SH.dark = new THREE.MeshStandardMaterial({ color: 0x111316, roughness: 0.5, metalness: 0.3 });
+  SH.sign = new THREE.MeshStandardMaterial({ color: 0x221a00, emissive: 0xffa000, emissiveIntensity: 1.4 });
+  SH.trailerPaint = [0xf2f2f0, 0x2b4c7e, 0xb33a2e, 0x6b7d5a, 0x9aa1a8].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.25 }));
   return SH;
 }
 
@@ -148,8 +163,19 @@ function upgradeCar(g, type, pick, keep, colorIdx) {
 export function makeCar(type, colorIdx, pick = colorIdx, upgrade = true) {
   const s = shared(), g = new THREE.Group(), paint = s.paints[colorIdx % s.paints.length];
   const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m); return m; };
-  let len = 4.5;
-  if (type === 'sedan') { add(s.geo.sedanBody, paint, 0, 0.68, 0); add(s.geo.sedanCab, s.glass, 0, 1.28, -0.25); }
+  let len = 4.5, axles = null;
+  if (type === 'bus') {
+    len = 11.6; const bp = s.busPaint[colorIdx % s.busPaint.length];
+    add(s.geo.busBody, bp, 0, 1.75, 0); add(s.geo.busWin, s.glass, 0, 2.35, -0.4);
+    add(s.geo.busFront, s.glass, 0, 2.15, 5.81); add(s.geo.busSign, s.sign, 0, 3.0, 5.82);
+    axles = [3.9, -3.4];
+  } else if (type === 'semi') {
+    len = 16.2; const cp = paint, tp = s.trailerPaint[colorIdx % s.trailerPaint.length];
+    add(s.geo.semiCab, cp, 0, 2.15, 6.85); add(s.geo.semiRoof, cp, 0, 3.85, 6.75); add(s.geo.semiWin, s.glass, 0, 2.85, 8.01);
+    add(s.geo.semiGrille, s.dark, 0, 1.55, 8.01); add(s.geo.semiChassis, s.dark, 0, 0.75, 0.2);
+    add(s.geo.semiBox, tp, 0, 2.85, -1.6);
+    axles = [7.2, 4.6, 3.3, -5.2, -6.5, -7.8];
+  } else if (type === 'sedan') { add(s.geo.sedanBody, paint, 0, 0.68, 0); add(s.geo.sedanCab, s.glass, 0, 1.28, -0.25); }
   else if (type === 'suv') { add(s.geo.suvBody, paint, 0, 0.82, 0); add(s.geo.suvCab, s.glass, 0, 1.6, -0.3); len = 4.7; }
   else if (type === 'lorry') {
     len = 8.8;
@@ -158,10 +184,16 @@ export function makeCar(type, colorIdx, pick = colorIdx, upgrade = true) {
   }
   else { add(s.geo.vanBody, paint, 0, 1.25, 0); add(s.geo.vanWin, s.glass, 0, 1.75, 2.58); len = 5.2; }
   const keep = new Set();
+  const big = type === 'lorry' || type === 'bus' || type === 'semi';
+  const ws = big ? 1.6 : 1; // 大車輪子大一點
   for (const sx of [1, -1]) {
-    for (const sz of [1, -1]) { add(s.wheel, s.tire, sx * 0.82, 0.33, sz * (len / 2 - 0.9)); add(s.hubG, s.hub, sx * 0.83, 0.33, sz * (len / 2 - 0.9)); }
-    keep.add(add(s.geo.lamp, s.head, sx * (type === 'lorry' ? 0.8 : 0.6), type === 'van' || type === 'lorry' ? 0.9 : 0.8, len / 2 + 0.01));
-    keep.add(add(s.geo.lamp, s.tail, sx * (type === 'lorry' ? 0.95 : 0.62), type === 'van' || type === 'lorry' ? 1.0 : 0.85, -len / 2 - 0.01));
+    for (const z of axles || [len / 2 - 0.9, -(len / 2 - 0.9)]) {
+      const w = add(s.wheel, s.tire, sx * (big ? 1.05 : 0.82), 0.33 * ws, z); w.scale.set(1, ws, ws);
+      const hb = add(s.hubG, s.hub, sx * (big ? 1.06 : 0.83), 0.33 * ws, z); hb.scale.set(1, ws, ws);
+    }
+    const front = type === 'semi' ? 8.03 : len / 2 + 0.01;
+    keep.add(add(s.geo.lamp, s.head, sx * (big ? 0.85 : 0.6), type === 'van' || big ? 0.95 : 0.8, front));
+    keep.add(add(s.geo.lamp, s.tail, sx * (big ? 1.0 : 0.62), type === 'van' || big ? 1.0 : 0.85, -len / 2 - 0.01));
   }
   if (upgrade) upgradeCar(g, type, pick, keep, colorIdx);
   return { g, len };
@@ -172,7 +204,8 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
   const cars = [];
   const types = ['sedan', 'sedan', 'suv', 'van'];
   for (let i = 0; i < count; i++) {
-    const { g, len } = makeCar(types[i % types.length], Math.floor(r() * COLORS.length));
+    // v35：每 7 台有一台公車
+    const { g, len } = makeCar(i % 7 === 6 ? 'bus' : types[i % types.length], Math.floor(r() * COLORS.length));
     scene.add(g);
     const axis = r() < 0.5 ? 'z' : 'x', line = ROADS[Math.floor(r() * ROADS.length)], dir = r() < 0.5 ? 1 : -1;
     // 起點：兩個路口之間
@@ -183,7 +216,8 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
   // 國道上的車（往西開回市區、往東開到林場前面迴轉）
   const hwCars = [];
   for (let i = 0; i < hwCount; i++) {
-    const { g, len } = makeCar(i % 3 === 0 ? 'lorry' : types[(i + 1) % types.length], Math.floor(r() * COLORS.length));
+    // v35：國道上有聯結車、小貨車、一般車
+    const { g, len } = makeCar(i % 4 === 0 ? 'semi' : i % 4 === 2 ? 'lorry' : types[(i + 1) % types.length], Math.floor(r() * COLORS.length));
     g.rotation.order = 'YXZ'; scene.add(g);
     const dir = i % 2 ? 1 : -1;
     const hl = len > 8 ? 1 : r() < 0.5 ? 0 : 1; // 大車走外側
@@ -630,8 +664,9 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
   function circles() {
     const out = [];
     for (const c of allCars()) {
-      const p = c.g.position, h = c.g.rotation.y, fx = Math.sin(h), fz = Math.cos(h), o = c.len / 2 - 1.0;
-      out.push({ x: p.x + fx * o, z: p.z + fz * o, y: p.y, r: 1.1, car: c }, { x: p.x - fx * o, z: p.z - fz * o, y: p.y, r: 1.1, car: c });
+      // v35：長的車（公車、聯結車）多放幾個圓，中間才不會撞穿
+      const p = c.g.position, h = c.g.rotation.y, fx = Math.sin(h), fz = Math.cos(h), o = c.len / 2 - 1.0, n = Math.max(2, Math.ceil(c.len / 3.5)), r = c.len > 9 ? 1.3 : 1.1;
+      for (let k = 0; k < n; k++) { const t = -o + (2 * o * k) / (n - 1); out.push({ x: p.x + fx * t, z: p.z + fz * t, y: p.y, r, car: c }); }
     }
     for (const item of managedFleet.values()) if(item.g.visible) { const p=item.g.position,h=item.g.rotation.y,fx=Math.sin(h),fz=Math.cos(h); out.push({x:p.x+fx*4,z:p.z+fz*4,y:p.y,r:1.6,car:item},{x:p.x-fx*4,z:p.z-fz*4,y:p.y,r:1.6,car:item}); }
     return out;
