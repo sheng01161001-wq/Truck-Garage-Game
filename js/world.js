@@ -14,29 +14,29 @@ export const ROAD_W = 14;
 export const WORLD = 466;
 // 可探索區域標記：供世界入口標示與 GPS 小地圖共用。
 export const DISTRICTS = [
-  { name: '城市商業區', short: '市中心', x: 0, z: 0, rx: 92, rz: 92, color: '#d7a84b' },
-  { name: '港灣物流區', short: '港區', x: -226, z: 164, rx: 74, rz: 72, color: '#4a9bd4' },
-  { name: '工業園區', short: '工業區', x: 202, z: -54, rx: 78, rz: 92, color: '#9aa6b2' },
-  { name: '農業產區', short: '農業區', x: 164, z: -228, rx: 72, rz: 62, color: '#83b65b' },
-  { name: '山區林道', short: '山區', x: 590, z: -100, rx: 110, rz: 150, color: '#7eaa83' },
-  { name: '西郊轉運區', short: '西郊', x: -390, z: -110, rx: 78, rz: 100, color: '#c18a5a' },
-  { name: '北城倉儲區', short: '北倉', x: -20, z: -390, rx: 110, rz: 62, color: '#8c9aa8' },
-  { name: '東區冷鏈區', short: '冷鏈', x: 390, z: 100, rx: 62, rz: 100, color: '#65a9bd' },
-  { name: '南郊配送區', short: '南郊', x: 100, z: 390, rx: 100, rz: 62, color: '#b49a55' },
+  { name: '台中市區', short: '市區', x: 0, z: 0, rx: 92, rz: 92, color: '#d7a84b' },
+  { name: '台中港區', short: '台中港', x: -226, z: 164, rx: 74, rz: 72, color: '#4a9bd4' },
+  { name: '台中工業區', short: '工業區', x: 202, z: -54, rx: 78, rz: 92, color: '#9aa6b2' },
+  { name: '彰化農業區', short: '農業區', x: 164, z: -228, rx: 72, rz: 62, color: '#83b65b' },
+  { name: '南投山區', short: '山區', x: 590, z: -100, rx: 110, rz: 150, color: '#7eaa83' },
+  { name: '大肚轉運區', short: '大肚', x: -390, z: -110, rx: 78, rz: 100, color: '#c18a5a' },
+  { name: '豐原倉儲區', short: '豐原', x: -20, z: -390, rx: 110, rz: 62, color: '#8c9aa8' },
+  { name: '太平冷鏈區', short: '太平', x: 390, z: 100, rx: 62, rz: 100, color: '#65a9bd' },
+  { name: '烏日物流區', short: '烏日', x: 100, z: 390, rx: 100, rz: 62, color: '#b49a55' },
 ];
 export const DEPOTS = [
-  { name: '港口', emoji: '🚢', x: -266, z: 160, bx: -288, bz: 160, color: '#1f5fa8', kind: 'port' },
-  { name: '農場', emoji: '🐄', x: 160, z: -264, bx: 160, bz: -287, color: '#4c7a2a', kind: 'farm' },
-  { name: '工廠', emoji: '🏭', x: 266, z: -20, bx: 288, bz: -20, color: '#5c6670', kind: 'factory' },
-  { name: '超市', emoji: '🛒', x: 0, z: 102, bx: 0, bz: 126, color: '#c62828', kind: 'shop' },
-  { name: '建材行', emoji: '🧱', x: -160, z: -102, bx: -160, bz: -126, color: '#b5651d', kind: 'site' },
-  { name: '玩具店', emoji: '🧸', x: 102, z: 170, bx: 126, bz: 170, color: '#d81b60', kind: 'shop' },
-  { name: '冰店', emoji: '🍦', x: -100, z: 264, bx: -100, bz: 287, color: '#0288d1', kind: 'shop' },
-  { name: '西郊轉運站', emoji: '📦', x: -425, z: -80, bx: -448, bz: -80, color: '#8d6e63', kind: 'shop' },
-  { name: '北城倉庫', emoji: '🏬', x: -80, z: -425, bx: -80, bz: -448, color: '#607d8b', kind: 'shop' },
-  { name: '東區冷鏈倉', emoji: '❄️', x: 425, z: 80, bx: 448, bz: 80, color: '#388eaa', kind: 'shop' },
-  { name: '南郊配送站', emoji: '🚚', x: 80, z: 425, bx: 80, bz: 448, color: '#9b7b35', kind: 'shop' },
-  { name: '貨櫃碼頭', emoji: '⚓', x: -425, z: 160, bx: -448, bz: 160, color: '#0d47a1', kind: 'quay' }, // v27：西邊海港
+  { name: '台中港', emoji: '🚢', x: -266, z: 160, bx: -288, bz: 160, color: '#1f5fa8', kind: 'port' },
+  { name: '彰化農會', emoji: '🌾', x: 160, z: -264, bx: 160, bz: -287, color: '#4c7a2a', kind: 'farm' },
+  { name: '台中工業區', emoji: '🏭', x: 266, z: -20, bx: 288, bz: -20, color: '#5c6670', kind: 'factory' },
+  { name: '市區量販店', emoji: '🛒', x: 0, z: 102, bx: 0, bz: 126, color: '#c62828', kind: 'shop' },
+  { name: '大肚建材行', emoji: '🧱', x: -160, z: -102, bx: -160, bz: -126, color: '#b5651d', kind: 'site' },
+  { name: '逢甲商圈', emoji: '🧸', x: 102, z: 170, bx: 126, bz: 170, color: '#d81b60', kind: 'shop' },
+  { name: '一中冰果室', emoji: '🍦', x: -100, z: 264, bx: -100, bz: 287, color: '#0288d1', kind: 'shop' },
+  { name: '大肚轉運站', emoji: '📦', x: -425, z: -80, bx: -448, bz: -80, color: '#8d6e63', kind: 'shop' },
+  { name: '豐原倉庫', emoji: '🏬', x: -80, z: -425, bx: -80, bz: -448, color: '#607d8b', kind: 'shop' },
+  { name: '太平冷鏈倉', emoji: '❄️', x: 425, z: 80, bx: 448, bz: 80, color: '#388eaa', kind: 'shop' },
+  { name: '烏日物流中心', emoji: '🚚', x: 80, z: 425, bx: 80, bz: 448, color: '#9b7b35', kind: 'shop' },
+  { name: '台中港貨櫃中心', emoji: '⚓', x: -425, z: 160, bx: -448, bz: 160, color: '#0d47a1', kind: 'quay' }, // v27：西邊海港
   LUMBER, // 山上林場（走國道、過收費站和隧道）
 ];
 export const GAS = { x: -58, z: 30, name: '加油站' };
@@ -508,7 +508,7 @@ export function buildWorld(scene, quality) {
       mesh(new THREE.BoxGeometry(0.9, 2, 0.6), red, GAS.x + dx, 1.3, GAS.z, root);
       mesh(new THREE.BoxGeometry(0.7, 0.4, 0.62), stdMat({ color: 0x111111, emissive: 0x30ff60, emissiveIntensity: 0.6 }), GAS.x + dx, 1.9, GAS.z, root);
     }
-    shed(GAS.x + 20, GAS.z, 10, 5, 14, '#e8e8e8', -Math.PI / 2, '便利商店', '#2e7d32');
+    shed(GAS.x + 20, GAS.z, 10, 5, 14, '#e8e8e8', -Math.PI / 2, '全日便利商店', '#2e7d32');
     const bt = boardTex('⛽ 加油站', '#c62828');
     const bm = stdMat({ map: bt, emissiveMap: bt, emissive: 0xffffff, emissiveIntensity: 0.2 }); nightMats.push({ mat: bm, on: 1.5 });
     mesh(new THREE.BoxGeometry(0.5, 9, 0.5), white, GAS.x - 12, 4.5, GAS.z - 12, root);

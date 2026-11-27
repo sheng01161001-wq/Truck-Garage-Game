@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v40';
+const VERSION = 'v41';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -1603,6 +1603,19 @@ function updateCamera(dt) {
 // ================= HUD =================
 const clusterCv = $('#cluster'), mapCv = $('#minimap');
 let lastMission = '', hudT = 0;
+// v41：沿著導航路線找下一個轉彎（方向改變超過 30 度）
+function navInfo(route) {
+  if (!route || route.pts.length < 3) return { text: '' };
+  const P = route.pts; let i0 = 1; while (i0 < P.length - 1 && Math.hypot(P[i0].x - S.x, P[i0].z - S.z) < 8) i0++;
+  let dist = Math.hypot(P[i0].x - S.x, P[i0].z - S.z);
+  for (let i = i0; i < P.length - 1; i++) {
+    const a1 = Math.atan2(P[i].x - P[i - 1].x, P[i].z - P[i - 1].z), a2 = Math.atan2(P[i + 1].x - P[i].x, P[i + 1].z - P[i].z), d = wrapAngle(a2 - a1);
+    const seg = Math.hypot(P[i + 1].x - P[i].x, P[i + 1].z - P[i].z);
+    if (Math.abs(d) > 0.52 && seg > 3) { const m = dist < 1000 ? `${Math.round(dist / 10) * 10} 公尺` : `${(dist / 1000).toFixed(1)} 公里`; return { text: `${d > 0 ? '↰' : '↱'} ${m}後${d > 0 ? '左轉' : '右轉'}`, dist }; }
+    dist += seg; if (dist > 2500) break;
+  }
+  return { text: '⬆ 直走' };
+}
 function updateHud(dt) {
   hudT += dt; if (hudT < 1 / 30) return; hudT = 0;
   const m = S.mission;
@@ -1615,10 +1628,14 @@ function updateHud(dt) {
     const nxt = S.route.pts.find((p, i) => i > 0 && Math.hypot(p.x - S.x, p.z - S.z) > 14) || d;
     const bearing = wrapAngle(Math.atan2(nxt.x - S.x, nxt.z - S.z) - S.heading);
     $('#navArrow').style.transform = `rotate(${-bearing}rad)`;
+    // v41：GPS 下一個轉彎、預計抵達時間、走不走國道
+    const nav = navInfo(S.route); S.navText = nav.text;
+    const etaS = Math.round(S.route.len / Math.max(Math.abs(S.v), S.route.len > 1500 ? 16 : 10));
+    const navRow = `<div class="m-row m-nav">${nav.text ? `<b>${nav.text}</b>　` : ''}預計 ${Math.floor(etaS / 60)}:${String(etaS % 60).padStart(2, '0')} 到${S.route.pts.some((p) => !inCity(p.x, p.z)) ? '　經 國道3號' : ''}${!inCity(S.x, S.z) ? `　（國道3號・速限 ${S.speedLimit}）` : ''}</div>`;
     const html = `<div class="m-title">${m.stage === 'pickup' ? '① 去接拖車' : '② 送貨中'}　${m.cargo} <small>${m.tons} 噸</small> <small class="m-contract">${m.contractType || '一般貨運'}</small></div>
       <div class="m-row">${m.stage === 'pickup' ? '到' : '送到'} <b>${d.emoji} ${d.name}</b>　<span class="m-dist">${km}</span>　<span class="m-pay">💰 ${m.reward}</span></div>
       <div class="m-row">${m.deadline ? (() => { const left = Math.round(m.deadline - (m.elapsed || 0)), a = Math.abs(left); return `<span class="m-time ${left < 0 ? 'late' : ''}">⏱ ${left < 0 ? '遲到 ' : '剩 '}${Math.floor(a / 60)}:${String(a % 60).padStart(2, '0')}</span>`; })() : ''}${m.stage === 'deliver' && m.cargoDmg > 0.005 ? `　<span class="m-dmg">📦 貨物損傷 ${Math.round(m.cargoDmg * 100)}%</span>` : ''}${m.fragile ? '　<span class="m-dmg">🥚 易碎，輕輕開</span>' : ''}</div>
-      ${S.hint ? `<div class="m-hint">${S.hint}</div>` : ''}`;
+      ${navRow}${S.hint ? `<div class="m-hint">${S.hint}</div>` : ''}`;
     if (html !== lastMission) { $('#missionText').innerHTML = html; lastMission = html; }
   }
   const tons = cargoTons();
@@ -1627,7 +1644,7 @@ function updateHud(dt) {
     fuel: save.fuel, temp: S.temp, damage: save.damage, indL: S.ind === 'L' || S.ind === 'H', indR: S.ind === 'R' || S.ind === 'H', blink: S.blink,
     lights: S.lights, wipers: S.wipers, brake: input.down || S.handbrake, engineWarn: save.damage > 0.6 || save.fuel <= 0 || !S.engineOn, tons: Math.round(9 + (S.coupled ? (TRAILER_PHYS[curTrailer()] || TRAILER_PHYS.box).empty + tons : 0)), retarder: S.retarder,
   });
-  drawMinimap(mapCv, { x: S.x, z: S.z, heading: S.heading, route: S.route, target: m ? missionTarget() : null, time: S.time, night: env.state.night > 0.5, cars: traffic.positions(), incidents: traffic.incidents(), selectedFleet: S.followFleetId ? traffic.fleetObject(S.followFleetId)?.position : null });
+  drawMinimap(mapCv, { navText: S.mission ? S.navText : '', x: S.x, z: S.z, heading: S.heading, route: S.route, target: m ? missionTarget() : null, time: S.time, night: env.state.night > 0.5, cars: traffic.positions(), incidents: traffic.incidents(), selectedFleet: S.followFleetId ? traffic.fleetObject(S.followFleetId)?.position : null });
 }
 
 // ================= 主迴圈 =================

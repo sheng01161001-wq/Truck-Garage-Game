@@ -288,7 +288,7 @@ export function updateHighway(dt, rigPts, carPos, speed) {
 
 // 林場（送貨點）
 const padP = hwAt(LEN - 42);
-export const LUMBER = { name: '林場', emoji: '🌲', x: padP.x, z: padP.z, y: padP.y, bx: hwAt(LEN - 8).x, bz: hwAt(LEN - 8).z, color: '#2e7d32', kind: 'lumber' };
+export const LUMBER = { name: '南投林場', emoji: '🌲', x: padP.x, z: padP.z, y: padP.y, bx: hwAt(LEN - 8).x, bz: hwAt(LEN - 8).z, color: '#2e7d32', kind: 'lumber' };
 export const TUNNEL_LAMPS = [];
 export const PIERS = []; // 橋墩（地面的車會撞到）：{ x, z, sx, sz }
 
@@ -806,12 +806,12 @@ export function buildHighway(root, ctx) {
     for (const x of [-w * 0.35, w * 0.35]) { const pl = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 4.6, 8), back); pl.position.set(x, 2.3, 0); g.add(pl); }
   };
   const t0 = TUNNELS[0];
-  sign(8, 10.5, '國道山區線　往 林場', '#1b5e20');
+  sign(8, 10.5, '國道3號　往 南投林場', '#1b5e20');
   sign(24, 16.5, '前方收費站　減速 30', '#1b5e20');
   sign(176, 10, '陡坡 8%　注意煞車', '#9a6a00');
   if (t0) sign(t0.s0 - 50, 10, `山風隧道　長 ${Math.round(t0.s1 - t0.s0)} 公尺　開大燈`, '#1b5e20', 10);
   if (t0) sign(t0.s1 + 50, -10, '隧道　開大燈', '#1b5e20');
-  sign(LEN - PAD_LEN - 20, -10, '往 市區', '#1b5e20');
+  sign(LEN - PAD_LEN - 20, -10, '往 台中市區', '#1b5e20');
   sign(LEN - PAD_LEN - 10, 10, '林場　大車迴轉區', '#2e7d32');
   sign(186, -10, '前方收費站　ETC 走內側', '#1b5e20');
   // 區段速限與山路警示牌，提醒玩家依道路環境控制車速。
@@ -841,10 +841,10 @@ export function buildHighway(root, ctx) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(8.4, 2.95, 0.18), side > 0 ? [gSteel, gSteel, gSteel, gSteel, gSteel, bm] : [gSteel, gSteel, gSteel, gSteel, bm, gSteel]); // 只有迎面來的車看得到字
     b.position.set(-side * 3.6, 6.45, -side * 0.25); b.castShadow = true; g.add(b);
   };
-  gantry(14, 1, '國道山區線　東行', 'ETC 走內側車道　現金走外側');
+  gantry(14, 1, '國道3號　東行　南投', 'ETC 走內側車道　現金走外側');
   gantry(90, 1, '休息站　100 公尺', '加油　維修　商店');
   gantry(184, 1, '林場 ↑　山風隧道', '隧道裡是陡坡 8%　大車注意');
-  gantry(LEN - PAD_LEN - 60, -1, '往 市區 ↑', '休息站　收費站');
+  gantry(LEN - PAD_LEN - 60, -1, '國道3號 西行　往 台中 ↑', '休息站　收費站');
   gantry(440, -1, '過隧道就到休息站', '維修　加油　商店');
   gantry(98, -1, '收費站　ETC 走內側', '現金車道請減速到 30');
 

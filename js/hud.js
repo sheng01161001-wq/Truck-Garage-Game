@@ -4,6 +4,7 @@ import { clamp, roundRectPath } from './util.js';
 import { PTS as HW_PTS, hwProject, inCity, LEN as HW_LEN, CITY_SIZE } from './highway.js';
 import { netRoute } from './roadnet.js';
 import { STRUCTS } from './elevated.js';
+import { TAIWAN_OUTLINE, REGIONS, FREEWAYS } from './regions.js';
 
 // ---------- 導航：地面道路＋高架／匝道（js/roadnet.js）----------
 // 國道上從 s0 走到 s1 的點（每 12 公尺一點）
@@ -79,6 +80,13 @@ export function drawMinimap(cv, st) {
   ctx.beginPath(); ctx.moveTo(cx, cy - 9); ctx.lineTo(cx + 7, cy + 7); ctx.lineTo(cx, cy + 3); ctx.lineTo(cx - 7, cy + 7); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.restore();
   ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, W / 2 - 2, 0, Math.PI * 2); ctx.stroke();
+  // v41：導航提示（駕駛座的導航螢幕也看得到）
+  if (st.navText) {
+    ctx.font = `bold ${Math.round(W * 0.07)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(st.navText).width + W * 0.08;
+    ctx.fillStyle = 'rgba(10,14,19,.85)'; roundRectPath(ctx, cx - tw / 2, W * 0.76, tw, W * 0.12, W * 0.04); ctx.fill();
+    ctx.fillStyle = '#ffd27a'; ctx.fillText(st.navText, cx, W * 0.82);
+  }
 }
 
 // ---------- v33：世界地圖（北方朝上，可以縮放拖曳） ----------
@@ -135,6 +143,16 @@ export function drawWorldMap(cv, st, view) {
   ctx.save(); ctx.translate(px, py); ctx.rotate(-h);
   ctx.fillStyle = '#ff9f1c'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5 * dpr;
   ctx.beginPath(); ctx.moveTo(0, -sz * 1.2); ctx.lineTo(sz, sz); ctx.lineTo(0, sz * 0.4); ctx.lineTo(-sz, sz); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  // v41：右下角「台灣路網」小圖：亮的是目前開放的區域
+  { const iw = 150 * dpr, ih = 230 * dpr, ix = W - iw - 14 * dpr, iy = H - ih - 56 * dpr;
+    ctx.fillStyle = 'rgba(8,12,18,.86)'; ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = dpr; roundRectPath(ctx, ix, iy, iw, ih, 10 * dpr); ctx.fill(); ctx.stroke();
+    const P = (lon, lat) => [ix + 10 * dpr + (lon - 119.95) / 2.1 * (iw - 20 * dpr), iy + 26 * dpr + (25.4 - lat) / 3.6 * (ih - 40 * dpr)];
+    ctx.beginPath(); TAIWAN_OUTLINE.forEach(([lo, la], i) => { const [x, y] = P(lo, la); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.fillStyle = '#26342a'; ctx.fill(); ctx.strokeStyle = '#6f8a74'; ctx.stroke();
+    for (const fw of FREEWAYS) { ctx.strokeStyle = fw.color; ctx.lineWidth = 1.6 * dpr; ctx.beginPath(); fw.via.forEach(([lo, la], i) => { const [x, y] = P(lo, la); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); }
+    ctx.font = `${Math.round(9 * dpr)}px sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    for (const r of REGIONS) { const [x, y] = P(r.lon, r.lat); ctx.fillStyle = r.open ? '#ff9f1c' : '#5d6b75'; ctx.beginPath(); ctx.arc(x, y, (r.open ? 4.5 : 2.5) * dpr, 0, Math.PI * 2); ctx.fill(); if (r.open || ['taipei', 'kaohsiung', 'hualien', 'tainan'].includes(r.id)) { ctx.fillStyle = r.open ? '#ffd27a' : '#93a1ae'; ctx.fillText(r.name, x + 6 * dpr, y); } }
+    ctx.fillStyle = '#e8edf2'; ctx.font = `bold ${Math.round(11 * dpr)}px sans-serif`; ctx.fillText('台灣路網', ix + 10 * dpr, iy + 13 * dpr);
+    ctx.fillStyle = '#93a1ae'; ctx.font = `${Math.round(9 * dpr)}px sans-serif`; ctx.fillText('● 開放　● 建置中', ix + 66 * dpr, iy + 13 * dpr); }
   // 比例尺
   const meters = [50, 100, 200, 500, 1000, 2000].find((m) => m * k > 80 * dpr) || 2000;
   const bx = 20 * dpr, by = H - 60 * dpr;

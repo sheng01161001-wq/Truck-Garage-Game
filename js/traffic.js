@@ -44,6 +44,10 @@ function shared() {
   g.lorryBox = new THREE.BoxGeometry(2.3, 2.6, 6.2);
   g.lorryWin = new THREE.BoxGeometry(2.0, 0.8, 0.05);
   SH.box = new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.6, metalness: 0.1 });
+  // v41：機車（台灣街頭）
+  g.scDeck = new RoundedBoxGeometry(0.42, 0.42, 1.5, 2, 0.12); g.scShield = new RoundedBoxGeometry(0.5, 0.8, 0.18, 2, 0.08); g.scSeat = new RoundedBoxGeometry(0.34, 0.14, 0.62, 2, 0.06);
+  g.rider = new THREE.CylinderGeometry(0.2, 0.24, 0.68, 10); g.helmet = new THREE.SphereGeometry(0.17, 12, 10); g.legs = new THREE.BoxGeometry(0.34, 0.4, 0.5);
+  SH.skin = new THREE.MeshStandardMaterial({ color: 0x31465e, roughness: 0.85 }); SH.helmets = [0xd32f2f, 0xf2f2f2, 0x1565c0, 0xfbc02d, 0x212121].map((c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.25, clearcoat: 1 }));
   // v35：市區公車、國道聯結車
   g.busBody = new RoundedBoxGeometry(2.5, 2.9, 11.6, 3, 0.18);
   g.busWin = new THREE.BoxGeometry(2.54, 1.0, 10.2);
@@ -164,7 +168,11 @@ export function makeCar(type, colorIdx, pick = colorIdx, upgrade = true) {
   const s = shared(), g = new THREE.Group(), paint = s.paints[colorIdx % s.paints.length];
   const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m); return m; };
   let len = 4.5, axles = null;
-  if (type === 'bus') {
+  if (type === 'scooter') { // v41：機車＋騎士
+    len = 1.9; axles = [0.68, -0.68];
+    add(s.geo.scDeck, paint, 0, 0.45, 0); add(s.geo.scShield, paint, 0, 0.78, 0.62); add(s.geo.scSeat, s.dark || paint, 0, 0.78, -0.25);
+    add(s.geo.legs, s.skin, 0, 0.88, 0.05); add(s.geo.rider, s.skin, 0, 1.3, -0.12); add(s.geo.helmet, s.helmets[colorIdx % s.helmets.length], 0, 1.78, -0.08);
+  } else if (type === 'bus') {
     len = 11.6; const bp = s.busPaint[colorIdx % s.busPaint.length];
     add(s.geo.busBody, bp, 0, 1.75, 0); add(s.geo.busWin, s.glass, 0, 2.35, -0.4);
     add(s.geo.busFront, s.glass, 0, 2.15, 5.81); add(s.geo.busSign, s.sign, 0, 3.0, 5.82);
@@ -185,13 +193,13 @@ export function makeCar(type, colorIdx, pick = colorIdx, upgrade = true) {
   else { add(s.geo.vanBody, paint, 0, 1.25, 0); add(s.geo.vanWin, s.glass, 0, 1.75, 2.58); len = 5.2; }
   const keep = new Set();
   const big = type === 'lorry' || type === 'bus' || type === 'semi';
-  const ws = big ? 1.6 : 1; // 大車輪子大一點
-  for (const sx of [1, -1]) {
+  const ws = big ? 1.6 : type === 'scooter' ? 0.75 : 1; // 大車輪子大一點、機車小一點
+  for (const sx of type === 'scooter' ? [0] : [1, -1]) {
     for (const z of axles || [len / 2 - 0.9, -(len / 2 - 0.9)]) {
       const w = add(s.wheel, s.tire, sx * (big ? 1.05 : 0.82), 0.33 * ws, z); w.scale.set(1, ws, ws);
       const hb = add(s.hubG, s.hub, sx * (big ? 1.06 : 0.83), 0.33 * ws, z); hb.scale.set(1, ws, ws);
     }
-    const front = type === 'semi' ? 8.03 : len / 2 + 0.01;
+    const front = type === 'semi' ? 8.03 : type === 'scooter' ? 0.72 : len / 2 + 0.01;
     keep.add(add(s.geo.lamp, s.head, sx * (big ? 0.85 : 0.6), type === 'van' || big ? 0.95 : 0.8, front));
     keep.add(add(s.geo.lamp, s.tail, sx * (big ? 1.0 : 0.62), type === 'van' || big ? 1.0 : 0.85, -len / 2 - 0.01));
   }
@@ -205,13 +213,13 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
   const types = ['sedan', 'sedan', 'suv', 'van'];
   for (let i = 0; i < count; i++) {
     // v35：每 7 台有一台公車
-    const { g, len } = makeCar(i % 7 === 6 ? 'bus' : types[i % types.length], Math.floor(r() * COLORS.length));
+    const { g, len } = makeCar(i % 7 === 6 ? 'bus' : i % 5 === 2 ? 'scooter' : types[i % types.length], Math.floor(r() * COLORS.length));
     scene.add(g);
     const axis = r() < 0.5 ? 'z' : 'x', line = ROADS[Math.floor(r() * ROADS.length)], dir = r() < 0.5 ? 1 : -1;
     // 起點：兩個路口之間
     const seg = Math.floor(r() * (ROADS.length - 1)), a = ROADS[seg] + 12, b = ROADS[seg + 1] - 12;
-    const lane = r() < 0.5 ? 0 : 1;
-    cars.push({ g, len, axis, line, dir, s: a + r() * (b - a), v: 8, vmax: 10 + r() * 4, turn: null, stall: 0, lane, lo: LANES[lane], laneCD: 0, yaw: 0 });
+    const lane = len < 3 ? 1 : r() < 0.5 ? 0 : 1; // 機車騎外側車道
+    cars.push({ g, len, axis, line, dir, s: a + r() * (b - a), v: 8, vmax: len < 3 ? 11 + r() * 3 : 10 + r() * 4, turn: null, stall: 0, lane, lo: LANES[lane], laneCD: 0, yaw: 0 });
   }
   // 國道上的車（往西開回市區、往東開到林場前面迴轉）
   const hwCars = [];
@@ -665,7 +673,7 @@ export function createTraffic(scene, count = 16, hwCount = 4) {
     const out = [];
     for (const c of allCars()) {
       // v35：長的車（公車、聯結車）多放幾個圓，中間才不會撞穿
-      const p = c.g.position, h = c.g.rotation.y, fx = Math.sin(h), fz = Math.cos(h), o = c.len / 2 - 1.0, n = Math.max(2, Math.ceil(c.len / 3.5)), r = c.len > 9 ? 1.3 : 1.1;
+      const p = c.g.position, h = c.g.rotation.y, fx = Math.sin(h), fz = Math.cos(h), o = Math.max(0.3, c.len / 2 - 1.0), n = Math.max(2, Math.ceil(c.len / 3.5)), r = c.len > 9 ? 1.3 : c.len < 3 ? 0.6 : 1.1;
       for (let k = 0; k < n; k++) { const t = -o + (2 * o * k) / (n - 1); out.push({ x: p.x + fx * t, z: p.z + fz * t, y: p.y, r, car: c }); }
     }
     for (const item of managedFleet.values()) if(item.g.visible) { const p=item.g.position,h=item.g.rotation.y,fx=Math.sin(h),fz=Math.cos(h); out.push({x:p.x+fx*4,z:p.z+fz*4,y:p.y,r:1.6,car:item},{x:p.x-fx*4,z:p.z-fz*4,y:p.y,r:1.6,car:item}); }
