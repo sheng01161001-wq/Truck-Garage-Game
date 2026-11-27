@@ -94,7 +94,8 @@ export function createEnv(renderer, scene) {
   function apply(time, weather, mix = null, regen = true) {
     state.time = time; state.weather = weather;
     const P = mix || TIMES[time];
-    const storm = weather === 'storm', rainy = weather === 'rain' || storm, foggy = weather === 'fog', snowy = weather === 'snow', over = weather === 'overcast'; // v37：陰天、大雨
+    const thunder = weather === 'storm', storm = thunder || weather === 'heavy', rainy = weather === 'rain' || storm, // v43：heavy＝大雨（沒有打雷）、storm＝雷雨
+      foggy = weather === 'fog', snowy = weather === 'snow', over = weather === 'overcast'; // v37：陰天、大雨
     const u = sky.material.uniforms;
     for (const s of [sky, envSky]) {
       const uu = s.material.uniforms;
@@ -129,7 +130,7 @@ export function createEnv(renderer, scene) {
     moon.position.copy(lightDir).multiplyScalar(2400);
     rain.visible = rainy; snow.visible = snowy; rain.material.opacity = storm ? 0.62 : 0.45;
     state.night = Math.min(1, P.night * (rainy || snowy ? 1.2 : 1));
-    state.wet = rainy; state.snow = snowy; state.storm = storm;
+    state.wet = rainy; state.snow = snowy; state.storm = thunder;
     // 反射用環境光：白天、黃昏用實拍天空 HDRI（烤漆、電鍍才有真的雲和光），晚上用程式算的暗天空
     if (regen) {
       if (envRT) envRT.dispose();
@@ -164,7 +165,7 @@ export function createEnv(renderer, scene) {
       hemi.intensity = state.hemiBase * (1 - 0.75 * state.cov) + state.flash * 5 * (1 - state.cov);
       scene.environmentIntensity = state.envBase * (1 - 0.75 * state.cov);
     }
-    if (!state.indoor) { rain.visible = (state.weather === 'rain' || state.weather === 'storm') && state.cov < 0.5; snow.visible = state.weather === 'snow' && state.cov < 0.5; }
+    if (!state.indoor) { rain.visible = ['rain', 'heavy', 'storm'].includes(state.weather) && state.cov < 0.5; snow.visible = state.weather === 'snow' && state.cov < 0.5; }
     if (snow.visible) {
       const tt = performance.now() / 1000;
       for (let i = 0; i < SNOW; i++) {
@@ -186,7 +187,7 @@ export function createEnv(renderer, scene) {
   function setIndoor(on) {
     state.indoor = on;
     scene.fog = on ? null : fogBase;
-    rain.visible = !on && (state.weather === 'rain' || state.weather === 'storm'); snow.visible = !on && state.weather === 'snow';
+    rain.visible = !on && ['rain', 'heavy', 'storm'].includes(state.weather); snow.visible = !on && state.weather === 'snow';
   }
   // 駕駛座：駕駛室裡面不要有雨雪
   function setCabClip(on) { nearClip.value = on ? 3.6 : 0; }

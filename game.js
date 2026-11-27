@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v42';
+const VERSION = 'v44';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -167,7 +167,7 @@ const PALETTE = ['#b71c1c', '#e65100', '#f9a825', '#2e7d32', '#00695c', '#0277bd
 
 function loadSave() {
   let s = null;
-  try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { s = null; }
+  try { s = migrateSave(JSON.parse(localStorage.getItem(SAVE_KEY))); } catch (e) { s = null; }
   const out = { coins: 500, owned: [], deliveries: 0, truck: { ...DEFAULT_TRUCK }, fleet: [], company: { name: '小棒槌物流', trucks: 1, engineLevel: 0, fuelLevel: 0, revenue: 0, expenses: 0, contracts: 0, wages: 0, maintenance: 0, fuelCost: 0, fleetLog: [], queuedCargo: null, fleetUnits: [] }, fuel: 1, damage: 0, dirt: 0.15,
     settings: { time: 'day', weather: 'clear', quality: IS_TOUCH ? 'mid' : 'high', traffic: 'normal', volume: 1, post: true, mirrors: true, fps: false, glb: true, gearbox: 'auto', steer: 'normal', shake: true, autoLights: true }, odo: 0, loan: 0, loanT: 0, ledger: [], xp: 0, garages: [], ver: SAVE_VER, ach: [], flags: {} };
   if (s && typeof s === 'object') {
@@ -195,6 +195,12 @@ function loadSave() {
     if (Number.isFinite(s.odo)) out.odo = Math.max(0, s.odo);
     if (Number.isFinite(s.loan)) out.loan = clamp(Math.round(s.loan), 0, 50000);
     if (Number.isFinite(s.xp)) out.xp = Math.max(0, Math.round(s.xp));
+    // v44：上次開到哪裡、手上的任務、拖車接了沒（重新打開遊戲接著開）
+    if (s.run && typeof s.run === 'object' && Number.isFinite(s.run.x) && Number.isFinite(s.run.z) && Number.isFinite(s.run.h)) {
+      const m = s.run.mission, okM = m && typeof m === 'object' && Number.isInteger(m.from) && Number.isInteger(m.to) && m.from < DEPOTS.length && m.to < DEPOTS.length && ['pickup', 'deliver'].includes(m.stage) && typeof m.cargo === 'string';
+      const P = s.run.parked, okP = P && Number.isFinite(P.x) && Number.isFinite(P.z) && Number.isFinite(P.h);
+      out.run = { x: s.run.x, z: s.run.z, y: Number.isFinite(s.run.y) ? s.run.y : null, h: s.run.h, coupled: !!s.run.coupled && okM && m.stage === 'deliver', mission: okM ? m : null, parked: okP ? { x: P.x, z: P.z, h: P.h, y: Number.isFinite(P.y) ? P.y : 0 } : null };
+    }
     if (Array.isArray(s.garages)) out.garages = s.garages.filter((i) => Number.isInteger(i) && i >= 0 && i < DEPOTS.length).slice(0, DEPOTS.length);
     else if (Number.isFinite(s.deliveries)) out.xp = Math.round(s.deliveries * 120); // 舊存檔：照送貨次數補經驗值
     if (Number.isFinite(s.loanT)) out.loanT = Math.max(0, s.loanT);
@@ -211,8 +217,8 @@ function loadSave() {
     }
     if (s.settings && typeof s.settings === 'object') {
       if (['day', 'dusk', 'night', 'dawn', 'auto'].includes(s.settings.time)) out.settings.time = s.settings.time;
-      if (['clear', 'overcast', 'rain', 'storm', 'fog', 'snow'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
-      if (['high', 'mid', 'low'].includes(s.settings.quality)) out.settings.quality = s.settings.quality;
+      if (['clear', 'overcast', 'rain', 'heavy', 'storm', 'fog', 'snow'].includes(s.settings.weather)) out.settings.weather = s.settings.weather;
+      if (['ultra', 'high', 'mid', 'low'].includes(s.settings.quality)) out.settings.quality = s.settings.quality;
       if (typeof s.settings.glb === 'boolean') out.settings.glb = s.settings.glb;
       if (typeof s.settings.music === 'boolean') out.settings.music = s.settings.music;
       if (['auto', 'manual'].includes(s.settings.gearbox)) out.settings.gearbox = s.settings.gearbox;
@@ -263,7 +269,13 @@ function money(amount, cat, note = '') {
   else save.ledger = [{ t: Date.now(), cat, note, v: amount }, ...(save.ledger || [])].slice(0, 200);
   if (typeof updateCoins === 'function' && document.getElementById('coinNum')) updateCoins();
 }
-function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); return true; } catch (e) { return false; } }
+// v44：存檔時順便記下位置和任務（遊戲剛載入、S 還沒建立時跳過）
+function persist() {
+  try { if (S.mode === 'drive' && S.mission) save.run = { x: S.x, z: S.z, y: S.y, h: S.heading, coupled: S.coupled, mission: S.mission, parked: S.parked }; } catch (e) { /* 還沒開始玩 */ }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); return true; } catch (e) { return false; }
+}
+// v44：存檔格式版本轉換（以後改格式時在這裡加一段，舊存檔照樣讀得到）
+function migrateSave(s) { if (!s || typeof s !== 'object') return s; if (!s.ver || s.ver < 3) { /* v1、v2 → v3：缺的欄位 loadSave 會補預設值 */ } return s; }
 let draft = { ...save.truck };
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -272,7 +284,8 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 save.flags = save.flags || {};
 if (!save.flags.q32) { if (save.settings.quality === 'low') save.settings.quality = 'mid'; save.flags.q32 = true; persist(); }
 // v32：畫質三段　高＝全部效果／中＝柔和陰影＋發光暗角（不做角落陰影）／低＝不做後製、不做陰影
-const QUAL = save.settings.quality, HIGH = QUAL === 'high', LOWQ = QUAL === 'low';
+// v43：ULTRA＝高畫質再加 4096 陰影、更細的環境光遮蔽、景深、2 倍解析度
+const QUAL = save.settings.quality, ULTRA = QUAL === 'ultra', HIGH = QUAL === 'high' || ULTRA, LOWQ = QUAL === 'low';
 const canvas = $('#c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, HIGH ? 2 : LOWQ ? 1 : 1.5)); // 手機最高 2 倍
@@ -284,6 +297,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.3, 3000);
 const env = createEnv(renderer, scene);
 if (!HIGH) env.sun.shadow.mapSize.set(1024, 1024);
+if (ULTRA) { env.sun.shadow.mapSize.set(4096, 4096); env.sun.shadow.radius = 2; }
 if (LOWQ) env.sun.castShadow = false;
 buildWorld(scene, HIGH ? 'high' : 'low');
 // 車流密度：少／中／多（多的時候路口會塞車）
@@ -791,8 +805,8 @@ $('#coins').addEventListener('click', () => {
 });
 
 // ---- 環境（時間、天氣、畫質） ----
-const TIME_N = { dawn: '🌅 日出', day: '☀️ 白天', dusk: '🌇 黃昏', night: '🌙 晚上', auto: '🔄 自動日夜' }, WEATHER_N = { clear: '🌤 晴天', overcast: '☁️ 陰天', rain: '🌧 下雨', storm: '⛈ 大雨', fog: '🌫 濃霧', snow: '❄️ 下雪' };
-const rainyW = (w) => w === 'rain' || w === 'storm';
+const TIME_N = { dawn: '🌅 日出', day: '☀️ 白天', dusk: '🌇 黃昏日落', night: '🌙 晚上', auto: '🔄 自動日夜' }, WEATHER_N = { clear: '🌤 晴天', overcast: '☁️ 陰天', rain: '🌦 小雨', heavy: '🌧 大雨', storm: '⛈ 雷雨', fog: '🌫 濃霧', snow: '❄️ 下雪' };
+const rainyW = (w) => w === 'rain' || w === 'heavy' || w === 'storm';
 // v30：自動日夜循環（12 分鐘一輪：白天 → 黃昏 → 晚上 → 清晨 → 白天，中間慢慢過渡）
 const DAY_CYCLE = [['day', 300], ['day>dusk', 30], ['dusk', 30], ['dusk>night', 30], ['night', 240], ['night>dawn', 30], ['dawn', 30], ['dawn>day', 30]]; // v37：早上是日出（東邊、粉橘色）
 const DAY_LEN = DAY_CYCLE.reduce((a, b) => a + b[1], 0);
@@ -823,7 +837,7 @@ function applyEnv() {
   refreshButtons();
 }
 function cycleEnv(kind) {
-  const list = kind === 'time' ? ['dawn', 'day', 'dusk', 'night', 'auto'] : ['clear', 'overcast', 'rain', 'storm', 'fog', 'snow'];
+  const list = kind === 'time' ? ['dawn', 'day', 'dusk', 'night', 'auto'] : ['clear', 'overcast', 'rain', 'heavy', 'storm', 'fog', 'snow'];
   save.settings[kind] = list[(list.indexOf(save.settings[kind]) + 1) % list.length];
   S.lightsManual = false; persist(); applyEnv(); renderEnvPanel();
   toast(kind === 'time' ? TIME_N[save.settings.time] : WEATHER_N[save.settings.weather], 1000);
@@ -833,7 +847,7 @@ function renderEnvPanel() {
   $('#envBody').innerHTML = `<div class="e-sec">時間</div><div class="opts">${Object.entries(TIME_N).map(([k, v]) => b('time', k, v)).join('')}</div>
     <div class="e-sec">天氣</div><div class="opts">${Object.entries(WEATHER_N).map(([k, v]) => b('weather', k, v)).join('')}</div>
     <div class="e-sec">車流（換了會重新載入）</div><div class="opts">${b('traffic', 'few', '少')}${b('traffic', 'normal', '中')}${b('traffic', 'many', '多（會塞車）')}</div>
-    <div class="e-sec">畫質（換了會重新載入）</div><div class="opts">${b('quality', 'high', '高（電腦）')}${b('quality', 'mid', '中（平板）')}${b('quality', 'low', '低（手機）')}</div>`;
+    <div class="e-sec">畫質（換了會重新載入）</div><div class="opts">${b('quality', 'ultra', 'ULTRA')}${b('quality', 'high', 'HIGH')}${b('quality', 'mid', 'MEDIUM')}${b('quality', 'low', 'LOW')}</div>`;
 }
 $('#envBody').addEventListener('click', (e) => {
   const o = e.target.closest('.opt'); if (!o) return;
@@ -1474,7 +1488,7 @@ function drive(dt) {
   // 方向燈自動回正
   if ((S.ind === 'L' || S.ind === 'R') && Math.abs(S.steer) > 0.25) S.indArmed = true;
   if (S.indArmed && Math.abs(S.steer) < 0.05) { S.ind = null; S.indArmed = false; refreshButtons(); }
-  Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel && S.engineOn, inside: S.cam === 2, retard: S.retarder, storm: env.state.weather === 'storm' });
+  Snd.update({ rpm: S.rpm, throttle: accelPedal, speed: S.v, surface: surf, rain: wet, running: !noFuel && S.engineOn, inside: S.cam === 2, retard: S.retarder, storm: env.state.weather === 'storm' || env.state.weather === 'heavy' });
 }
 
 // 紅綠燈：前面紅燈會提醒；紅燈還開過路口就跳「闖紅燈」
@@ -1687,28 +1701,33 @@ if (!LOWQ && save.settings.post !== false) {
     import('three/addons/postprocessing/GTAOPass.js'), import('three/addons/postprocessing/UnrealBloomPass.js'),
     import('three/addons/postprocessing/OutputPass.js'), import('three/addons/postprocessing/ShaderPass.js'),
     import('three/addons/shaders/VignetteShader.js'),
-  ]).then(([{ EffectComposer }, { RenderPass }, { GTAOPass }, { UnrealBloomPass }, { OutputPass }, { ShaderPass }, { VignetteShader }]) => {
+  ]).then(async ([{ EffectComposer }, { RenderPass }, { GTAOPass }, { UnrealBloomPass }, { OutputPass }, { ShaderPass }, { VignetteShader }]) => {
     const w = window.innerWidth, h = window.innerHeight;
     const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: HIGH ? 4 : 2 });
     const composer = new EffectComposer(renderer, rt);
-    composer.setPixelRatio(Math.min(renderer.getPixelRatio(), HIGH ? 1.5 : 1.25));
+    composer.setPixelRatio(Math.min(renderer.getPixelRatio(), ULTRA ? 2 : HIGH ? 1.5 : 1.25));
     composer.setSize(w, h);
     composer.addPass(new RenderPass(scene, camera));
     let gtao = null;
     if (HIGH) { // 輕微的環境光遮蔽（角落、車底比較暗）
       gtao = new GTAOPass(scene, camera, w, h);
-      gtao.updateGtaoMaterial({ radius: 1.2, distanceExponent: 1.6, thickness: 2.0, scale: 1.0, samples: 12 });
+      gtao.updateGtaoMaterial({ radius: 1.2, distanceExponent: 1.6, thickness: 2.0, scale: 1.0, samples: ULTRA ? 16 : 12 });
       gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
-      gtao.blendIntensity = 0.6;
+      gtao.blendIntensity = ULTRA ? 0.75 : 0.6;
       composer.addPass(gtao);
     }
     const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.45, 1.6); // 車燈、路燈這種很亮的東西會發光（晚上會加強）
     composer.addPass(bloom);
+    let bokeh = null;
+    if (ULTRA) { // 景深：對焦在卡車，遠景稍微柔一點（駕駛座不開）
+      const { BokehPass } = await import('three/addons/postprocessing/BokehPass.js');
+      bokeh = new BokehPass(scene, camera, { focus: 20, aperture: 0.00012, maxblur: 0.006 }); composer.addPass(bokeh);
+    }
     composer.addPass(new OutputPass());
     const vignette = new ShaderPass(VignetteShader); // 暗角：畫面四周稍微暗一點，像電影鏡頭
     vignette.uniforms.offset.value = 1.0; vignette.uniforms.darkness.value = 1.15;
     composer.addPass(vignette);
-    post = { composer, gtao, bloom, vignette, slow: 0, setSize(a, b) { composer.setSize(a, b); } };
+    post = { composer, gtao, bloom, vignette, bokeh, slow: 0, setSize(a, b) { composer.setSize(a, b); } };
   }).catch((e) => console.warn('後製效果載入失敗，用一般畫面：', e));
 }
 // 數位後照鏡（駕駛座視角才顯示）：畫面左右上方各一個小畫面
@@ -1766,6 +1785,35 @@ function renderMirrors() {
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
   renderer.autoClear = auto; renderer.shadowMap.autoUpdate = shadowAuto;
+}
+// v43：下雨路面濕：車輪後面噴水霧（車速越快越多）
+const SPRAY_N = LOWQ ? 0 : 420, spPos = new Float32Array(SPRAY_N * 3), spVel = new Float32Array(SPRAY_N * 3), spLife = new Float32Array(SPRAY_N);
+const spGeo = new THREE.BufferGeometry(); spGeo.setAttribute('position', new THREE.BufferAttribute(spPos, 3));
+const spTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d'), g = x.createRadialGradient(16, 16, 1, 16, 16, 15); g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c); })();
+const spray = new THREE.Points(spGeo, new THREE.PointsMaterial({ map: spTex, size: 0.9, transparent: true, opacity: 0.32, depthWrite: false, color: 0xc8d2dc }));
+spray.frustumCulled = false; scene.add(spray); let spIdx = 0;
+for (let i = 0; i < SPRAY_N; i++) spPos[i * 3 + 1] = -999;
+function updateSpray(dt) {
+  if (!SPRAY_N) return;
+  const on = S.mode === 'drive' && env.state.wet && Math.abs(S.v) > 6 && !S.tunNear;
+  if (on) {
+    const n = Math.min(14, Math.round(Math.abs(S.v) * 0.35)), fx = Math.sin(S.heading), fz = Math.cos(S.heading), tx = Math.sin(S.trailerHeading), tz = Math.cos(S.trailerHeading), rx = fz, rz = -fx;
+    const spots = [-0.7, ...(S.coupled ? [-10.7, -12] : [])];
+    for (let k = 0; k < n; k++) {
+      const off = spots[k % spots.length], side = k % 2 ? 1 : -1, i = spIdx++ % SPRAY_N, onT = off < -5;
+      const bx = onT ? S.x - tx * -off : S.x + fx * off, bz = onT ? S.z - tz * -off : S.z + fz * off;
+      spPos[i * 3] = bx + rx * side * 1.15 + (Math.random() - 0.5) * 0.3; spPos[i * 3 + 1] = S.y + 0.3; spPos[i * 3 + 2] = bz + rz * side * 1.15 + (Math.random() - 0.5) * 0.3;
+      const back = Math.abs(S.v) * 0.25; spVel[i * 3] = -(onT ? tx : fx) * back + rx * side * 0.8 + (Math.random() - 0.5); spVel[i * 3 + 1] = 1.2 + Math.random() * 1.5; spVel[i * 3 + 2] = -(onT ? tz : fz) * back + rz * side * 0.8 + (Math.random() - 0.5);
+      spLife[i] = 0.7;
+    }
+  }
+  for (let i = 0; i < SPRAY_N; i++) {
+    if (spLife[i] <= 0) continue;
+    spLife[i] -= dt; spVel[i * 3 + 1] -= 3 * dt;
+    spPos[i * 3] += spVel[i * 3] * dt; spPos[i * 3 + 1] += spVel[i * 3 + 1] * dt; spPos[i * 3 + 2] += spVel[i * 3 + 2] * dt;
+    if (spLife[i] <= 0) spPos[i * 3 + 1] = -999;
+  }
+  spGeo.attributes.position.needsUpdate = true;
 }
 // v30：駕駛座看出去的擋風玻璃雨滴（開雨刷會刷掉）
 const wsCv = document.createElement('canvas'); wsCv.id = 'windshieldDrops'; document.body.appendChild(wsCv);
@@ -1835,7 +1883,7 @@ function frame(dt) {
   for (const w of rig.trailerSpins) w.rotation.x = S.wheelAngle;
   for (const f of rig.front) f.rotation.y = S.steer;
   rig.steeringWheel.rotation.z = -S.steer * 7;
-  if (S.wipers) S.wiperT += dt * (env.state.weather === 'storm' ? 3.6 : 2.6); // 大雨刷快一點
+  if (S.wipers) S.wiperT += dt * (env.state.weather === 'storm' || env.state.weather === 'heavy' ? 3.6 : 2.6); // 大雨刷快一點
   if (S.wipers && S.mode === 'drive') { const ph = Math.floor(S.wiperT / Math.PI); if (ph !== S.wiperPh) { S.wiperPh = ph; Snd.wiper(S.cam === 2); } } // v37：雨刷刷過去的聲音
   if (env.state.thunder) { env.state.thunder = false; if (S.mode !== 'title') Snd.thunder(env.state.thunderDist || 0.5); }
   const wa = S.wipers ? (1 - Math.cos(S.wiperT)) * 0.85 : Math.max(0, rig.wipers[0].rotation.z * -1 - dt * 3) ;
@@ -1858,6 +1906,7 @@ function frame(dt) {
   updateWorldAnim(S.time, dt);
   updateDayCycle(dt);
   updateMeta(dt);
+  updateSpray(dt);
   const pts = rigPoints(S.x, S.z, S.heading, S.trailerHeading);
   // 卡車在高架橋上時，橋下的車不用讓它（把卡車位置移到很遠的地方給車流看）
   const tPts = S.y > 2.5 && inCity(S.x, S.z) ? pts.map((p) => ({ ...p, x: p.x + 5000 })) : pts;
@@ -1886,6 +1935,7 @@ function frame(dt) {
     if (S.time > 8) post.slow = post.slow * 0.99 + (dt > 0.03 ? 1 : 0) * 0.01; // 開始玩 8 秒後才算，載入時的卡頓不算
     if (post.slow > 0.75 && post.gtao && post.gtao.enabled) { post.gtao.enabled = false; console.info('畫面太慢，關掉環境光遮蔽'); }
     post.bloom.strength = 0.3 + env.state.night * 0.55; // 晚上車燈路燈的光暈比較明顯
+    if (post.bokeh) { const u = post.bokeh.uniforms; u.focus.value = camera.position.distanceTo(focus) || 20; u.maxblur.value = S.cam === 2 || inGarage() ? 0 : 0.006; }
     post.composer.render(dt);
   } else renderer.render(scene, camera);
   renderMirrors();
@@ -1897,8 +1947,8 @@ const ACH = [
   { id: 'ten', ic: '📦', n: '小小運輸員', d: '送貨 10 趟', rw: 300, ok: () => save.deliveries >= 10 },
   { id: 'fifty', ic: '🏅', n: '運輸達人', d: '送貨 50 趟', rw: 1200, ok: () => save.deliveries >= 50 },
   { id: 'star5', ic: '⭐', n: '五星司機', d: '拿到一次五顆星評價', rw: 200, ok: () => save.flags?.star5 },
-  { id: 'lumber', ic: '🌲', n: '上山送貨', d: '把貨送到山上林場（要過收費站和隧道）', rw: 300, ok: () => save.flags?.lumber },
-  { id: 'quay', ic: '⚓', n: '港口卡車', d: '把貨送到貨櫃碼頭', rw: 200, ok: () => save.flags?.quay },
+  { id: 'lumber', ic: '🌲', n: '上山送貨', d: '把貨送到南投林場（要過收費站和隧道）', rw: 300, ok: () => save.flags?.lumber },
+  { id: 'quay', ic: '⚓', n: '港口卡車', d: '把貨送到台中港貨櫃中心', rw: 200, ok: () => save.flags?.quay },
   { id: 'heavy', ic: '🏋️', n: '大力士', d: '載 24 噸以上送達', rw: 250, ok: () => save.flags?.heavy },
   { id: 'night', ic: '🌙', n: '夜班司機', d: '晚上送達一趟', rw: 200, ok: () => save.flags?.night },
   { id: 'snow', ic: '❄️', n: '雪地老手', d: '下雪天送達一趟', rw: 300, ok: () => save.flags?.snow },
@@ -1931,6 +1981,7 @@ function perfTick(realDt) {
   if (S.mode === 'title') return;
   prT += realDt; if (prT < 2) return;
   if (fpsEma > 1 / 28 && pr > Math.max(0.6, prBase * 0.55)) { pr = Math.max(0.6, pr - 0.1); prT = 0; applyPR(); }
+  else if (fpsEma > 1 / 24 && HIGH && !S.qWarned && S.time > 30) { S.qWarned = true; toast(`畫面有點卡：可以到「⚙️ 設定」把畫質調低一級（目前 ${ULTRA ? 'ULTRA' : 'HIGH'}）`, 4000); }
   else if (fpsEma < 1 / 50 && pr < prBase && prT > 6) { pr = Math.min(prBase, pr + 0.1); prT = 0; applyPR(); }
 }
 function applyPR() { renderer.setPixelRatio(pr); if (post) post.composer.setPixelRatio(Math.min(pr, HIGH ? 1.5 : 1.25)); resize(); }
@@ -2013,7 +2064,7 @@ function renderMenu() {
     h += `<div class="studio-note">完成成就會拿到金幣獎勵（${got.length}／${ACH.length}）</div>` + ACH.map((a) => `<div class="ach ${got.includes(a.id) ? '' : 'locked'}"><span class="ic">${a.ic}</span><div><b>${a.n}${got.includes(a.id) ? ' ✅' : ''}</b><small>${a.d}</small></div><span class="rw">💰 ${a.rw}</span></div>`).join('');
   } else if (menuTab === 'settings') {
     h += `<div class="set-row"><span>音量</span><input type="range" min="0" max="100" value="${Math.round((save.settings.volume ?? 1) * 100)}" data-vol></div>
-      <div class="set-row"><span>畫質（換了會重新載入）</span><div class="opts">${opt('quality', 'high', '高（電腦）')}${opt('quality', 'mid', '中（平板）')}${opt('quality', 'low', '低（手機）')}</div></div>
+      <div class="set-row"><span>畫質（換了會重新載入）</span><div class="opts">${opt('quality', 'ultra', 'ULTRA 極致')}${opt('quality', 'high', 'HIGH 高')}${opt('quality', 'mid', 'MEDIUM 中')}${opt('quality', 'low', 'LOW 低')}</div></div>
       <div class="set-row"><span>卡車模型</span><div class="opts">${opt('glb', true, '寫實模型')}${opt('glb', false, '簡單模型')}</div></div>
       <div class="set-row"><span>光影後製（高、中畫質才有）</span><div class="opts">${opt('post', true, '開')}${opt('post', false, '關（比較順）')}</div></div>
       <div class="set-row"><span>配樂（sounds 資料夾有放音樂才會播）</span><div class="opts">${opt('music', true, '開')}${opt('music', false, '關')}</div></div>
@@ -2024,6 +2075,8 @@ function renderMenu() {
       <div class="studio-note">畫面太卡時，遊戲會自動把解析度調低一點，順了再調回來。</div>`;
   } else if (menuTab === 'save') {
     h += `<div class="studio-note">遊戲會自動存檔在這台裝置上。要換電腦或平板玩，先「匯出存檔」，到新的裝置再「匯入存檔」。</div>
+      <div class="studio-note"><b>手動存檔位</b>（遊戲本身每次有變化都會自動存檔）</div>
+      ${[1, 2, 3].map((n) => { let info = '空的'; try { const d = JSON.parse(localStorage.getItem(SAVE_KEY + '_slot' + n) || 'null'); if (d) info = `${new Date(d.t).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}｜💰 ${Number(d.save.coins).toLocaleString()}｜送貨 ${d.save.deliveries} 趟`; } catch (e) { info = '讀不到'; } return `<div class="set-row"><span>存檔位 ${n}：${info}</span><div class="opts"><button class="opt" data-act="slot-save-${n}">存到這裡</button><button class="opt" data-act="slot-load-${n}">讀取</button></div></div>`; }).join('')}
       <button class="big-act gold" data-act="export">📤 匯出存檔（下載檔案）</button>
       <label class="big-act" style="text-align:center">📥 匯入存檔<input type="file" accept=".json,application/json" data-act="import" style="display:none"></label>
       <button class="big-act red" data-act="reset">🗑 重新開始新遊戲（全部歸零）</button>`;
@@ -2072,6 +2125,15 @@ $('#menuBody').addEventListener('click', (e) => {
     if (save.coins < GARAGE_PRICE) { toast(`金幣不夠，還差 ${(GARAGE_PRICE - save.coins).toLocaleString()}`, 1600); return; }
     if (!confirm(`用 ${GARAGE_PRICE.toLocaleString()} 金幣買下「${DEPOTS[i].name}」的車庫？`)) return;
     money(-GARAGE_PRICE, '車庫', DEPOTS[i].name); save.garages = [...(save.garages || []), i]; persist(); Snd.buy(); toast(`🏠 買下「${DEPOTS[i].name}」車庫！`, 1800); renderMenu();
+  } else if (act && act.startsWith('slot-save-')) {
+    const n = act.slice(10); persist();
+    try { localStorage.setItem(SAVE_KEY + '_slot' + n, JSON.stringify({ t: Date.now(), save })); toast(`💾 已存到存檔位 ${n}`, 1400); } catch (e) { toast('存檔空間不足（彩繪圖片太大可以先刪掉）', 2200); }
+    renderMenu();
+  } else if (act && act.startsWith('slot-load-')) {
+    const n = act.slice(10); let d = null; try { d = JSON.parse(localStorage.getItem(SAVE_KEY + '_slot' + n) || 'null'); } catch (e) { d = null; }
+    if (!d || !d.save) { toast('這個存檔位是空的', 1200); return; }
+    if (!confirm(`讀取存檔位 ${n}？目前沒存的進度會被取代。`)) return;
+    localStorage.setItem(SAVE_KEY, JSON.stringify(d.save)); location.reload();
   } else if (act === 'money') { menuTab = 'money'; renderMenu();
   } else if (act === 'resume') { closeMenu();
   } else if (act === 'jobs') { closeMenu(); openJobs();
@@ -2108,9 +2170,18 @@ resize();
 updateCoins();
 $('#ver').textContent = '卡車改裝王 X ' + VERSION;
 $('#startBtn').disabled = false; $('#loadMsg').textContent = '';
+function restoreRun() {
+  const R = save.run; if (!R || S.restored) return false; S.restored = true;
+  if (Math.abs(R.x) > 3000 || Math.abs(R.z) > 3000) return false;
+  Object.assign(S, { x: R.x, z: R.z, heading: R.h, trailerHeading: R.h, v: 0, y: groundAt(R.x, R.z, R.y ?? null) }); // 在高架橋上存的檔，回來還是在橋上
+  if (R.mission) { S.mission = { ...R.mission }; S.coupled = !!R.coupled; S.parked = R.coupled ? null : R.parked || depotTrailerPose(R.mission.from); S.pendingPark = null; S.route = null; rebuildRig(save.truck); rig.setLoaded(S.coupled); }
+  placeRig(); return true;
+}
 function startDriving(tutorial = false) {
   Snd.init(); Snd.setVolume(save.settings.volume ?? 1); Snd.setMusic(save.settings.music !== false);
   S.mode = 'drive'; camInit = false;
+  const resumed = !tutorial && restoreRun();
+  if (resumed) setTimeout(() => toast('▶ 接著上次的位置和任務繼續開', 2200), 400);
   $('#title').classList.add('hidden'); $('#hud').classList.remove('hidden'); $('#touch').classList.remove('hidden');
   closeMenu();
   if (tutorial || (!save.deliveries && !(save.flags && save.flags.tutSeen))) startTutorial();
