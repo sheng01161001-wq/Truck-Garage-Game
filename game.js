@@ -12,7 +12,7 @@ import { drawCluster, drawMinimap, computeRoute, drawWorldMap, mapBounds } from 
 import { clamp, wrapAngle } from './js/util.js';
 import { groundAt, surfaceY, hwBlocked, hwProject, inCity, inTunnel, nearTunnel, updateHighway, speedLimitAt, restZoneAt, nearRest, isEtcLane, TOLL_S, TUNNEL_LAMPS, PTS as HW_PTS } from './js/highway.js';
 
-const VERSION = 'v33';
+const VERSION = 'v34';
 const $ = (s) => document.querySelector(s);
 const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -508,6 +508,8 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'ShiftLeft' || k === 'ShiftRight' || k === 'PageUp') manualShift(1);
   else if (k === 'ControlLeft' || k === 'ControlRight' || k === 'PageDown') manualShift(-1);
   else if (k === 'KeyN') toggleSound();
+  else if (k === 'Equal' || k === 'NumpadAdd') S.camDist = clamp(S.camDist / 1.15, 0.55, 2.2);
+  else if (k === 'Minus' || k === 'NumpadSubtract') S.camDist = clamp(S.camDist * 1.15, 0.55, 2.2);
   else if (k === 'KeyG') openGarage();
   else if (k === 'KeyQ') setIndicator('L');
   else if (k === 'KeyE') setIndicator('R');
@@ -530,13 +532,30 @@ document.querySelectorAll('.tc').forEach((b) => {
   b.addEventListener('contextmenu', (e) => e.preventDefault());
 });
 // 拖曳畫面：車庫轉鏡頭、開車時環顧四周
-canvas.addEventListener('pointerdown', (e) => { S.gDrag = { x: e.clientX, a: inGarage() ? S.gAng : S.camYaw }; });
+// v34：兩根手指捏合＝鏡頭遠近（手機平板）
+const touchPts = new Map(); let pinch0 = 0, pinchDist0 = 1;
+canvas.addEventListener('pointerdown', (e) => {
+  touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touchPts.size === 2) { const [a, b] = [...touchPts.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); pinchDist0 = inGarage() ? S.gRadius : S.camDist; S.gDrag = null; return; }
+  S.gDrag = { x: e.clientX, y: e.clientY, a: inGarage() ? S.gAng : S.camYaw, p: S.camPitch };
+});
 window.addEventListener('pointermove', (e) => {
+  if (touchPts.has(e.pointerId)) touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touchPts.size === 2 && pinch0 > 0) {
+    const [a, b] = [...touchPts.values()], k = pinch0 / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+    if (inGarage()) S.gRadius = clamp(pinchDist0 * k, 6.5, 19); else S.camDist = clamp(pinchDist0 * k, 0.55, 2.2);
+    return;
+  }
   if (!S.gDrag) return;
   const v = S.gDrag.a - (e.clientX - S.gDrag.x) * 0.008;
-  if (inGarage()) S.gAng = v; else { S.camYaw = v; S.camYawT = 2.5; }
+  if (inGarage()) S.gAng = v;
+  else {
+    S.camYaw = v; S.camYawT = 2.5;
+    if (S.cam === 2) S.camPitch = clamp(S.gDrag.p - (e.clientY - S.gDrag.y) * 0.004, -0.6, 0.45); // 駕駛座：上下看
+  }
 });
-window.addEventListener('pointerup', () => { S.gDrag = null; });
+const endPtr = (e) => { touchPts.delete(e.pointerId); if (touchPts.size < 2) pinch0 = 0; S.gDrag = null; };
+window.addEventListener('pointerup', endPtr); window.addEventListener('pointercancel', endPtr);
 
 // ================= 介面 =================
 let toastTimer = 0;
@@ -694,7 +713,9 @@ $('#showroomHud').addEventListener('click', (e) => { const b = e.target.closest(
 $('#zoomIn').onclick = () => { S.gRadius = clamp(S.gRadius - 1.5, 6.5, 19); S.gAutoRotate = false; $('#rotateToggle').classList.remove('active'); $('#rotateToggle').textContent = '▶ 手動旋轉'; };
 $('#zoomOut').onclick = () => { S.gRadius = clamp(S.gRadius + 1.5, 6.5, 19); S.gAutoRotate = false; $('#rotateToggle').classList.remove('active'); $('#rotateToggle').textContent = '▶ 手動旋轉'; };
 $('#rotateToggle').onclick = () => { S.gAutoRotate = !S.gAutoRotate; $('#rotateToggle').classList.toggle('active', S.gAutoRotate); $('#rotateToggle').textContent = S.gAutoRotate ? '⟳ 自動旋轉' : '▶ 手動旋轉'; };
-canvas.addEventListener('wheel', (e) => { if (!inGarage()) return; e.preventDefault(); S.gRadius = clamp(S.gRadius + Math.sign(e.deltaY) * 1.1, 6.5, 19); S.gAutoRotate = false; $('#rotateToggle').classList.remove('active'); $('#rotateToggle').textContent = '▶ 手動旋轉'; }, { passive: false });
+canvas.addEventListener('wheel', (e) => {
+  if (!inGarage()) { if (S.mode !== 'drive') return; e.preventDefault(); S.camDist = clamp(S.camDist * (e.deltaY > 0 ? 1.1 : 1 / 1.1), 0.55, 2.2); return; } // v34：開車時滾輪＝鏡頭遠近
+  e.preventDefault(); S.gRadius = clamp(S.gRadius + Math.sign(e.deltaY) * 1.1, 6.5, 19); S.gAutoRotate = false; $('#rotateToggle').classList.remove('active'); $('#rotateToggle').textContent = '▶ 手動旋轉'; }, { passive: false });
 const secHtml = (t) => `<div class="g-sec">${t}</div>`;
 function swatchHtml(key) {
   return `<div class="swatches">${PALETTE.map((c) => `<button class="sw ${draft[key] === c ? 'sel' : ''}" data-key="${key}" data-col="${c}" style="background:${c}"></button>`).join('')}</div>`;
@@ -1317,7 +1338,8 @@ function updateCamera(dt) {
     rig.cabInner.localToWorld(want.copy(rig.camLocal));
     const q = new THREE.Quaternion(); rig.cab.getWorldQuaternion(q);
     const yaw = S.camYawT > 0 ? S.camYaw : 0;
-    look.set(Math.sin(yaw) * 10, -0.45, Math.cos(yaw) * 10).applyQuaternion(q).add(want);
+    if (S.camYawT <= 0 && !S.gDrag) S.camPitch *= Math.max(0, 1 - dt * 2); // 放開滑鼠後慢慢回正
+    look.set(Math.sin(yaw) * 10, -0.45 + Math.tan(S.camPitch) * 10, Math.cos(yaw) * 10).applyQuaternion(q).add(want);
     camPos.copy(want); camLook.copy(look);
     camera.position.copy(want); camera.lookAt(look); return;
   } else if (S.cam === 3 && !S.tunNear) {
@@ -1328,7 +1350,8 @@ function updateCamera(dt) {
   } else {
     // 隧道附近鏡頭放低，才不會穿到山裡
     // 隧道附近：鏡頭比拖車頂高一點、比隧道頂低，往前看遠一點才不會被拖車擋住
-    const back = S.tunNear ? 15 : S.cam === 1 ? 42 : 19, up = S.tunNear ? 6.6 : S.cam === 1 ? 30 : 8.5;
+    const cd = S.tunNear ? Math.min(1, S.camDist) : S.camDist; // v34：滾輪調遠近（隧道裡最多原本距離）
+    const back = (S.tunNear ? 15 : S.cam === 1 ? 42 : 19) * cd, up = (S.tunNear ? 6.6 : S.cam === 1 ? 30 : 8.5) * Math.pow(cd, 0.8);
     if (S.camYawT > 0) { S.camYawT -= dt; if (S.camYawT <= 0) S.camYaw = 0; }
     const th = S.trailerHeading * 0.55 + S.heading * 0.45 + (S.camYawT > 0 ? S.camYaw : 0);
     want.set(S.x - Math.sin(th) * back + fx * 2, S.y + up, S.z - Math.cos(th) * back + fz * 2);
@@ -1415,22 +1438,26 @@ if (!LOWQ && save.settings.post !== false) {
   }).catch((e) => console.warn('後製效果載入失敗，用一般畫面：', e));
 }
 // 數位後照鏡（駕駛座視角才顯示）：畫面左右上方各一個小畫面
-const mirrorCams = [new THREE.PerspectiveCamera(32, 1.3, 0.5, HIGH ? 600 : 250), new THREE.PerspectiveCamera(32, 1.3, 0.5, HIGH ? 600 : 250)]; // 順暢模式看近一點，比較省
-const mirrorFrames = [document.createElement('div'), document.createElement('div')];
-mirrorFrames.forEach((d, i) => { d.className = 'mirror-frame'; d.innerHTML = `<span>${i ? '右後' : '左後'}</span>`; document.body.appendChild(d); });
+// 0、1＝主後照鏡；2、3＝下面的廣角鏡（看得比較寬、比較近，低畫質不畫）
+const MIRROR_N = LOWQ ? 2 : 4;
+const mirrorCams = [0, 1, 2, 3].slice(0, MIRROR_N).map((i) => new THREE.PerspectiveCamera(i < 2 ? 32 : 64, 1.3, 0.5, i < 2 ? (HIGH ? 600 : 250) : 160)); // 順暢模式看近一點，比較省
+const mirrorFrames = mirrorCams.map(() => document.createElement('div'));
+mirrorFrames.forEach((d, i) => { d.className = 'mirror-frame' + (i > 1 ? ' wide' : ''); d.innerHTML = `<span>${['左後', '右後', '左廣角', '右廣角'][i]}</span>`; document.body.appendChild(d); });
 const mirrorRect = (i) => {
   const W = window.innerWidth, H = window.innerHeight, mw = Math.round(Math.min(W * 0.2, 300)), mh = Math.round(mw / 1.3);
-  const top = Math.round(H * (W < 760 ? 0.2 : 0.16));
-  return { x: i ? W - mw - 10 : 10, y: top, w: mw, h: mh }; // 0＝左邊（駕駛座在左）、1＝右邊
+  const top = Math.round(H * (W < 760 ? 0.2 : 0.16)), right = i % 2 === 1;
+  if (i < 2) return { x: right ? W - mw - 10 : 10, y: top, w: mw, h: mh }; // 0＝左邊（駕駛座在左）、1＝右邊
+  const ww = Math.round(mw * 0.62), wh = Math.round(ww / 1.3);
+  return { x: right ? W - ww - 10 : 10, y: top + mh + 10, w: ww, h: wh };
 };
 const _mv = new THREE.Vector3(), _mf = new THREE.Vector3();
 // 後照鏡先畫到小貼圖（隔幾格才重畫一次，比較省），每一格再把貼圖貼到畫面角落
-const mirrorRTs = [0, 1].map(() => new THREE.WebGLRenderTarget(320, 246, { samples: HIGH ? 4 : 0, type: THREE.HalfFloatType }));
+const mirrorRTs = mirrorCams.map((c, i) => new THREE.WebGLRenderTarget(i < 2 ? 320 : 220, i < 2 ? 246 : 170, { samples: HIGH ? 4 : 0, type: THREE.HalfFloatType }));
 const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quadScene = new THREE.Scene();
 const quadMat = new THREE.MeshBasicMaterial(), quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), quadMat); // 貼到畫面時才做色調（跟主畫面一樣）
 quadScene.add(quad);
 let mirrorTick = 0;
-const mirrorReady = [false, false];
+const mirrorReady = [false, false, false, false];
 function renderMirrors() {
   const show = S.mode === 'drive' && S.cam === 2 && !inGarage() && !S.followFleetId;
   document.body.classList.toggle('cab-view', show);
@@ -1441,21 +1468,22 @@ function renderMirrors() {
   const auto = renderer.autoClear, shadowAuto = renderer.shadowMap.autoUpdate;
   renderer.shadowMap.autoUpdate = false; // 後照鏡不用重算陰影
   const fx2 = -Math.sin(S.trailerHeading), fz2 = -Math.cos(S.trailerHeading); // 往後看（沿著拖車）
-  rig.mirrorLocal.forEach((ml, i) => {
-    if ((mirrorTick + i) % every !== 0 && mirrorReady[i]) return;
-    const cam = mirrorCams[i];
-    rig.cabInner.localToWorld(_mv.copy(ml));
-    const side = i ? -1 : 1; // 車頭座標 +x＝左邊：0＝左後照鏡、1＝右後照鏡，鏡頭稍微往外看
-    const ox = Math.cos(S.heading) * side * 1.2, oz = -Math.sin(S.heading) * side * 1.2;
+  mirrorCams.forEach((cam, i) => {
+    const wide = i > 1, ev = wide ? every * 2 : every; // 廣角鏡更新得慢一點，比較省
+    if ((mirrorTick + i) % ev !== 0 && mirrorReady[i]) return;
+    rig.cabInner.localToWorld(_mv.copy(rig.mirrorLocal[i % 2]));
+    if (wide) _mv.y -= 0.6;
+    const side = i % 2 ? -1 : 1; // 車頭座標 +x＝左邊：0＝左後照鏡、1＝右後照鏡，鏡頭稍微往外看
+    const out = wide ? 7 : 1.2, ox = Math.cos(S.heading) * side * out, oz = -Math.sin(S.heading) * side * out;
     cam.position.copy(_mv);
-    cam.lookAt(_mf.set(_mv.x + fx2 * 30 + ox, _mv.y - 1.2, _mv.z + fz2 * 30 + oz));
-    cam.aspect = 320 / 246; cam.updateProjectionMatrix();
+    cam.lookAt(_mf.set(_mv.x + fx2 * 30 + ox, _mv.y - (wide ? 4.5 : 1.2), _mv.z + fz2 * 30 + oz));
+    cam.aspect = 1.3; cam.updateProjectionMatrix();
     renderer.setRenderTarget(mirrorRTs[i]); renderer.autoClear = true; renderer.render(scene, cam);
     mirrorReady[i] = true;
   });
   renderer.setRenderTarget(null);
   renderer.autoClear = false; renderer.setScissorTest(true);
-  rig.mirrorLocal.forEach((ml, i) => {
+  mirrorCams.forEach((cam, i) => {
     const r = mirrorRect(i), vy = H - r.y - r.h;
     renderer.setViewport(r.x, vy, r.w, r.h); renderer.setScissor(r.x, vy, r.w, r.h);
     quadMat.map = mirrorRTs[i].texture; renderer.render(quadScene, quadCam);
