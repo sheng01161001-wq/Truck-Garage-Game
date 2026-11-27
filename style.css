@@ -23,6 +23,31 @@ kbd { display: inline-block; min-width: 24px; padding: 0 6px; margin-right: 3px;
 .btn-big:active { transform: translateY(2px); }
 .btn-big:disabled { background: #4a525b; color: #9aa4ae; box-shadow: none; }
 .load { margin-top: 10px; color: #8a96a3; font-size: 14px; }
+/* v33：主選單（模擬駕駛遊戲風格：左側清單、細線分隔、選取時橘色條） */
+.tmenu { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0 6px; }
+.ti { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px 14px; border-radius: 10px; cursor: pointer;
+  background: linear-gradient(90deg, rgba(22,28,36,.92), rgba(14,18,24,.75)); border: 1px solid rgba(255,255,255,.1); border-left: 4px solid transparent; color: #e8edf2;
+  transition: border-color .2s, background .2s, transform .2s; font-family: inherit; }
+.ti b { font-size: 17px; letter-spacing: 1px; } .ti small { font-size: 12px; color: #93a1ae; }
+.ti:hover, .ti:focus-visible { border-left-color: #ff9f1c; background: linear-gradient(90deg, rgba(60,42,16,.95), rgba(20,22,26,.8)); transform: translateX(3px); outline: none; }
+.ti.main { grid-column: 1 / -1; background: linear-gradient(90deg, #ffb547, #ff8c00); color: #111; border-color: #ffb547; padding: 13px 18px; }
+.ti.main b { font-size: 22px; } .ti.main small { color: #3a2a10; }
+.ti.main:disabled { background: #4a525b; color: #9aa4ae; border-color: #4a525b; }
+.ti:disabled { opacity: .45; cursor: default; transform: none; }
+@media (max-width: 760px) { .tmenu { grid-template-columns: 1fr 1fr; } .ti { padding: 8px 10px; } .ti b { font-size: 15px; } .ti small { display: none; } h1 { font-size: 40px; } .sub { display: none; } }
+/* v33：世界地圖 */
+#mapPanel { position: fixed; inset: 0; z-index: 45; background: #0b1016; }
+#mapPanel.hidden { display: none; }
+#worldMap { width: 100vw; height: 100vh; display: block; touch-action: none; cursor: grab; }
+.wm-bar { position: absolute; left: 12px; right: 12px; top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: #e8edf2; }
+.wm-bar b { font-size: 18px; margin-right: 6px; } .wm-bar span { color: #f7c66b; font-weight: 800; flex: 1; min-width: 120px; }
+.wm-bar button { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(16,22,30,.9); color: #fff; font-weight: 800; cursor: pointer; font-size: 15px; }
+.wm-legend { position: absolute; left: 12px; bottom: 12px; color: #b9c4cf; font-size: 13px; background: rgba(10,14,19,.8); padding: 8px 12px; border-radius: 10px; }
+.wm-legend span { margin-right: 12px; } .wm-legend span::before { content: ''; display: inline-block; width: 18px; height: 5px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+.lg-route::before { background: #ff9f1c; } .lg-hw::before { background: #e9eef3; } .lg-el::before { background: #8fb7e0; } .lg-dp::before { background: #2ecc71; }
+#controls .gbx-m { display: none; } body.manual #controls .gbx-m { display: flex; }
+#controls { flex-wrap: wrap-reverse; max-width: calc(100vw - 440px); }
+body.touch #controls { max-width: calc(100vw - 24px); }
 
 /* 開車資訊 */
 #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }

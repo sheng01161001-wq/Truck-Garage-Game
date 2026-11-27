@@ -29,19 +29,23 @@
     <div class="t-kicker">寫實重型卡車模擬</div>
     <h1>卡車改裝王</h1>
     <p class="sub">開聯結車送貨賺錢，把卡車改裝成你的專屬座駕。</p>
-    <div class="howto">
-      <div><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 油門／煞車（停住後按住＝倒車）／方向盤</div>
-      <div><kbd>Q</kbd><kbd>E</kbd> 方向燈　<kbd>L</kbd> 大燈　<kbd>K</kbd> 雨刷　<kbd>H</kbd> 喇叭</div>
-      <div><kbd>C</kbd> 換鏡頭　<kbd>T</kbd> 換時間　<kbd>Y</kbd> 換天氣　<kbd>G</kbd> 改裝廠</div>
-      <div class="tip">平板手機用畫面上的按鈕。跟著小地圖的<b>橘色導航線</b>開，停進黃色<b>裝卸區</b>就會自動裝貨、卸貨。</div>
-    </div>
     <div id="tStats" class="t-stats"></div>
-    <button id="startBtn" class="btn-big" disabled>發動引擎</button>
+    <!-- v33：主選單（9 項） -->
+    <nav class="tmenu">
+      <button id="startBtn" class="ti main" disabled><b>▶ 繼續遊戲</b><small>從上次的進度接著開</small></button>
+      <button class="ti" data-go="new"><b>🚚 開始遊戲</b><small>開新的運輸生涯</small></button>
+      <button class="ti" data-go="jobs"><b>📋 工作任務</b><small>貨運市場挑貨物接單</small></button>
+      <button class="ti" data-go="garage"><b>🏆 卡車車庫</b><small>收藏的卡車、換車</small></button>
+      <button class="ti" data-go="mods"><b>🔧 卡車改裝</b><small>烤漆、零件、性能</small></button>
+      <button class="ti" data-go="map"><b>🗺 世界地圖</b><small>城市、國道、物流中心</small></button>
+      <button class="ti" data-go="fleet"><b>🏢 車隊管理</b><small>買車、雇司機、派遣</small></button>
+      <button class="ti" data-go="settings"><b>⚙️ 遊戲設定</b><small>畫質、聲音、操作</small></button>
+      <button class="ti" data-go="save"><b>💾 存檔管理</b><small>匯出、匯入、重新開始</small></button>
+    </nav>
     <div class="menu-row">
       <button class="mbtn" data-menu="tutorial">🎓 新手教學</button>
-      <button class="mbtn" data-menu="ach">🏆 成就</button>
-      <button class="mbtn" data-menu="settings">⚙️ 設定</button>
-      <button class="mbtn" data-menu="save">💾 存檔</button>
+      <button class="mbtn" data-menu="ach">🏅 成就</button>
+      <button class="mbtn" data-menu="help">⌨️ 操作說明</button>
       <a class="mbtn" href="side.html" style="text-decoration:none">🎬 橫向電影模式</a>
     </div>
     <div id="loadMsg" class="load">載入中…</div>
@@ -63,6 +67,7 @@
     <button id="bEnv" class="tbtn">🌤<span>天氣</span></button>
     <button id="bCam" class="tbtn">📷<span>鏡頭</span></button>
     <button id="bReset" class="tbtn">🔄<span>回廠</span></button>
+    <button id="bMap" class="tbtn">🗺<span>地圖</span></button>
     <button id="bSound" class="tbtn">🔊<span>聲音</span></button>
     <button id="bMenu" class="tbtn">☰<span>選單</span></button>
   </div>
@@ -74,6 +79,10 @@
     <button id="cH" class="cbtn">⚠<span>警示燈</span></button>
     <button id="cHorn" class="cbtn">📯<span>喇叭</span></button>
     <button id="cRet" class="cbtn on">🛑<span>排氣煞車</span></button>
+    <button id="cPark" class="cbtn">🅿<span>手煞車</span></button>
+    <button id="cGbx" class="cbtn">A<span>自排</span></button>
+    <button id="cDown" class="cbtn gbx-m">－<span>降檔</span></button>
+    <button id="cUp" class="cbtn gbx-m">＋<span>升檔</span></button>
     <button id="cR" class="cbtn">▶<span>方向燈</span></button>
   </div>
   <canvas id="cluster" width="520" height="230"></canvas>
@@ -83,6 +92,14 @@
 <div id="menuPanel" class="hidden"><div id="menuBody"></div></div>
 <div id="tutBox" class="hidden"></div>
 <div id="fpsBox" class="hidden"></div>
+
+<!-- v33：世界地圖（M） -->
+<div id="mapPanel" class="hidden">
+  <canvas id="worldMap"></canvas>
+  <div class="wm-bar"><b>🗺 世界地圖</b><span id="wmInfo"></span>
+    <button id="wmFollow">📍 我的位置</button><button id="wmIn">＋</button><button id="wmOut">－</button><button id="wmClose">✕ 關閉（M）</button></div>
+  <div class="wm-legend"><span class="lg-route">導航路線</span><span class="lg-hw">國道</span><span class="lg-el">高架／匝道</span><span class="lg-dp">物流點</span>　拖曳移動、滾輪縮放</div>
+</div>
 
 <!-- v28：接單板／送貨收據 -->
 <div id="jobPanel" class="hidden"><div id="jobBody"></div></div>
